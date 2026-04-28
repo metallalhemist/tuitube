@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "include": ["src/core/**/*.ts", "src/integrations/**/*.ts", "src/adapters/**/*.ts", "src/server/**/*.ts"],
+  "exclude": ["node_modules", "**/*.test.ts"],
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "jsx": "react-jsx"
+  }
+}
