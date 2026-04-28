@@ -182,6 +182,8 @@
     "@types/validator": "^13.15.10",
     "date-fns": "^4.1.0",
     "execa": "^9.6.0",
+    "fastify": "^5.8.5",
+    "grammy": "^1.42.0",
     "pretty-bytes": "^6.1.1",
     "react": "^19.2.3",
     "srt-parser-2": "^1.2.3",
@@ -194,12 +196,18 @@
     "eslint": "^9.36.0",
     "globals": "^17.0.0",
     "prettier": "^3.6.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.2",
-    "typescript-eslint": "^8.52.0"
+    "typescript-eslint": "^8.52.0",
+    "vitest": "^4.1.5"
   },
   "scripts": {
     "build": "termcast build",
-    "dev": "termcast dev"
+    "dev": "termcast dev",
+    "backend:dev": "LOG_LEVEL=${LOG_LEVEL:-debug} tsx src/server/index.ts",
+    "backend:build": "tsc -p tsconfig.backend.json",
+    "backend:start": "node dist/server/index.js",
+    "test:core": "vitest run"
   },
   "platforms": [
     "macOS",

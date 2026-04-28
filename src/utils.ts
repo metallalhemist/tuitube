@@ -1,14 +1,27 @@
 import { getPreferenceValues } from "termcast";
 import { formatDuration, intervalToDuration } from "date-fns";
-import validator from "validator";
-import { Format, Video } from "./types.js";
 import { existsSync } from "fs";
 import { execSync } from "child_process";
+import {
+  isValidHHMM as isValidHHMMCore,
+  isValidUrl as isValidUrlCore,
+  parseHHMM as parseHHMMCore,
+} from "./core/validation.js";
+import { sanitizeVideoTitle as sanitizeVideoTitleCore } from "./core/sanitize.js";
+import type { DownloadOptions as CoreDownloadOptions } from "./core/types.js";
+import {
+  formatFilesize,
+  formatTbr,
+  getFormats,
+  getFormatTitle,
+  getFormatValue,
+  MP3_FORMAT_ID,
+} from "./core/format-selection.js";
 
 export const isWindows = process.platform === "win32";
 export const isMac = process.platform === "darwin";
 
-function getExtendedPath() {
+export function getExtendedPath() {
   const basePath = process.env.PATH || "";
   const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
   return [...extraPaths, basePath].join(":");
@@ -45,7 +58,12 @@ export const getytdlPath = () => {
 
   try {
     const cmd = isWindows ? "where yt-dlp" : "which yt-dlp";
-    return sanitizeWindowsPath(execSync(cmd, { env: { ...process.env, PATH: getExtendedPath() } }).toString().trim().split("\n")[0]);
+    return sanitizeWindowsPath(
+      execSync(cmd, { env: { ...process.env, PATH: getExtendedPath() } })
+        .toString()
+        .trim()
+        .split("\n")[0],
+    );
   } catch {
     // Check common paths on macOS
     const commonPaths = ["/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp", `${homebrewPath}/bin/yt-dlp`];
@@ -62,7 +80,12 @@ export const getffmpegPath = () => {
 
   try {
     const cmd = isWindows ? "where ffmpeg" : "which ffmpeg";
-    return sanitizeWindowsPath(execSync(cmd, { env: { ...process.env, PATH: getExtendedPath() } }).toString().trim().split("\n")[0]);
+    return sanitizeWindowsPath(
+      execSync(cmd, { env: { ...process.env, PATH: getExtendedPath() } })
+        .toString()
+        .trim()
+        .split("\n")[0],
+    );
   } catch {
     const commonPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", `${homebrewPath}/bin/ffmpeg`];
     for (const p of commonPaths) {
@@ -78,7 +101,12 @@ export const getffprobePath = () => {
 
   try {
     const cmd = isWindows ? "where ffprobe" : "which ffprobe";
-    return sanitizeWindowsPath(execSync(cmd, { env: { ...process.env, PATH: getExtendedPath() } }).toString().trim().split("\n")[0]);
+    return sanitizeWindowsPath(
+      execSync(cmd, { env: { ...process.env, PATH: getExtendedPath() } })
+        .toString()
+        .trim()
+        .split("\n")[0],
+    );
   } catch {
     const commonPaths = ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", `${homebrewPath}/bin/ffprobe`];
     for (const p of commonPaths) {
@@ -88,13 +116,7 @@ export const getffprobePath = () => {
   }
 };
 
-export type DownloadOptions = {
-  url: string;
-  format: string;
-  copyToClipboard: boolean;
-  startTime?: string;
-  endTime?: string;
-};
+export type DownloadOptions = CoreDownloadOptions;
 
 export function formatHHMM(seconds: number) {
   const duration = intervalToDuration({ start: 0, end: seconds * 1000 });
@@ -110,140 +132,19 @@ export function formatHHMM(seconds: number) {
 }
 
 export function parseHHMM(input: string) {
-  const parts = input.split(":");
-  if (parts.length === 2) {
-    const [minutes, seconds] = parts;
-    return parseInt(minutes) * 60 + parseInt(seconds);
-  } else if (parts.length === 3) {
-    const [hours, minutes, seconds] = parts;
-    return parseInt(hours) * 60 * 60 + parseInt(minutes) * 60 + parseInt(seconds);
-  }
-  throw new Error("Invalid input");
+  return parseHHMMCore(input);
 }
 
 export function isValidHHMM(input: string) {
-  try {
-    if (input) {
-      parseHHMM(input);
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  return isValidHHMMCore(input);
 }
 
 export function isValidUrl(url: string) {
-  return validator.isURL(url, { require_protocol: false });
+  return isValidUrlCore(url);
 }
-
-export function formatTbr(tbr: number | null) {
-  if (!tbr) return "";
-  return `${Math.floor(tbr)} kbps`;
-}
-
-export function formatFilesize(filesize?: number, filesizeApprox?: number) {
-  const size = filesize || filesizeApprox;
-  if (!size) return "";
-
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 ** 2) {
-    return `${(size / 1024).toFixed(2)} KiB`;
-  }
-  if (size < 1024 ** 3) {
-    return `${(size / 1024 ** 2).toFixed(2)} MiB`;
-  }
-  return `${(size / 1024 ** 3).toFixed(2)} GiB`;
-}
-
-const hasCodec = ({ vcodec, acodec }: Format) => {
-  return {
-    hasVcodec: Boolean(vcodec) && vcodec !== "none",
-    hasAcodec: Boolean(acodec) && acodec !== "none",
-  };
-};
-
-export const MP3_FORMAT_ID = "bestaudio#mp3";
-
-const mp3Format: Format = {
-  format_id: "bestaudio",
-  ext: "mp3",
-  video_ext: "none",
-  protocol: "https",
-  resolution: "audio only",
-  vcodec: "none",
-  acodec: "mp3",
-  tbr: null,
-  filesize: undefined,
-  filesize_approx: undefined,
-};
-
-export const getFormats = (video?: Video) => {
-  const videoKey = "Video";
-  const audioOnlyKey = "Audio Only";
-  const videoWithAudio: Format[] = [];
-  const audioOnly: Format[] = [];
-
-  if (!video) return { [videoKey]: videoWithAudio, [audioOnlyKey]: audioOnly };
-
-  audioOnly.push(mp3Format);
-
-  for (const format of video.formats.slice().reverse()) {
-    const { hasAcodec, hasVcodec } = hasCodec(format);
-    if (hasVcodec) videoWithAudio.push(format);
-    else if (hasAcodec && !hasVcodec) audioOnly.push(format);
-    else continue;
-  }
-
-  return { [videoKey]: videoWithAudio, [audioOnlyKey]: audioOnly };
-};
-
-export const getFormatValue = (format: Format) => {
-  const { hasAcodec } = hasCodec(format);
-  const audio = hasAcodec ? "" : "+bestaudio";
-  const targetExt = `#${format.ext}`;
-  return format.format_id + audio + targetExt;
-};
-
-export const getFormatTitle = (format: Format) =>
-  [format.resolution, format.ext, formatTbr(format.tbr), formatFilesize(format.filesize)]
-    .filter((x) => Boolean(x))
-    .join(" | ");
 
 export function sanitizeVideoTitle(name: string): string {
-  const maxLen = 200;
-  const invalidChars = isWindows ? ["<", ">", ":", '"', "/", "\\", "|", "?", "*"] : [":"];
-
-  // Trim and remove invalid characters
-  let safe = name.trim();
-  for (const char of invalidChars) {
-    safe = safe.replaceAll(char, "");
-  }
-
-  // Remove control characters
-  safe = Array.from(safe)
-    .filter((char) => char.charCodeAt(0) >= 32)
-    .join("");
-
-  // Remove trailing dots and spaces on Windows
-  if (isWindows) safe = safe.replace(/[. ]+$/, "");
-
-  // Replace double or more spaces with single space
-  safe = safe.replace(/\s+/g, " ");
-
-  // Hard truncate to max length
-  safe = safe.slice(0, maxLen);
-
-  // Truncate to max length at a sensible boundary if possible (like a punctuation mark)
-  const cutoffSymbols = /[.!?]/g;
-  const match = [...safe.matchAll(cutoffSymbols)]
-    .map((m) => m.index)
-    .filter((idx) => idx !== undefined && idx <= maxLen);
-
-  if (match.length > 0) {
-    safe = safe.slice(0, match[match.length - 1]);
-  }
-
-  return safe.trim() || "untitled";
+  return sanitizeVideoTitleCore(name, isWindows ? "win32" : process.platform);
 }
+
+export { formatFilesize, formatTbr, getFormats, getFormatTitle, getFormatValue, MP3_FORMAT_ID };
