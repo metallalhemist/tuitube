@@ -1,11 +1,12 @@
 import { Bot } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryJobQueue } from "../core/jobs/in-memory-queue.js";
 import { JobService } from "../core/jobs/job-service.js";
 import type { DownloadJob } from "../core/jobs/queue.js";
 import { buildWebhookUrl, loadServerConfig, validateWebhookSecret } from "./config.js";
 import { createServerApp } from "./app.js";
+import { TELEGRAM_ALLOWED_UPDATES, registerTelegramWebhook } from "./webhook-registration.js";
 
 const botInfo: UserFromGetMe = {
   id: 123,
@@ -78,5 +79,21 @@ describe("server config and app", () => {
     });
     expect(signedWebhookResponse.statusCode).toBe(200);
     await app.close();
+  });
+
+  it("registers webhook callback queries for menu callbacks", async () => {
+    const setWebhook = vi.fn(async () => true);
+
+    await registerTelegramWebhook({
+      bot: { api: { setWebhook } } as never,
+      webhookUrl: "https://example.com/telegram/webhook",
+      webhookSecret: "secret_token",
+    });
+
+    expect(TELEGRAM_ALLOWED_UPDATES).toEqual(["message", "callback_query"]);
+    expect(setWebhook).toHaveBeenCalledWith("https://example.com/telegram/webhook", {
+      secret_token: "secret_token",
+      allowed_updates: ["message", "callback_query"],
+    });
   });
 });

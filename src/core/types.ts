@@ -80,6 +80,12 @@ export type SerializableFormatOption = {
   policy: PolicyState;
 };
 
+export type VideoSelectionSnapshot = {
+  title: string;
+  duration: number;
+  formatOptions: SerializableFormatOption[];
+};
+
 export type DownloadResult = {
   filePath: string;
   fileName: string;

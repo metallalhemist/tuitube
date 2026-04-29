@@ -52,6 +52,18 @@ export class InMemoryJobQueue<TJob extends { id: string }> implements JobQueue<T
     this.logger.info("queue.enqueue.finish", { jobId: job.id, size: this.jobs.length });
   }
 
+  cancel(jobId: string): boolean {
+    const index = this.jobs.findIndex((job) => job.id === jobId);
+    if (index < 0) {
+      this.logger.debug("queue.cancel.missing", { jobId });
+      return false;
+    }
+
+    this.jobs.splice(index, 1);
+    this.logger.debug("queue.cancel.removed", { jobId, size: this.jobs.length });
+    return true;
+  }
+
   async next(signal?: AbortSignal): Promise<TJob | undefined> {
     const job = this.jobs.shift();
     if (job) {

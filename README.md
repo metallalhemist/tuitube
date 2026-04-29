@@ -63,7 +63,15 @@ See <https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md>.
 
 ## Telegram Backend
 
-Tuitube also includes a Fastify + grammY backend foundation for webhook-based Telegram deployments. It keeps long video work outside the HTTP webhook lifecycle by acknowledging updates quickly and handing downloads to an in-memory worker queue.
+Tuitube also includes a Fastify + grammY backend for webhook-based Telegram deployments. It keeps long video work outside the HTTP webhook lifecycle by acknowledging updates quickly and handing metadata preparation, downloads, MP3 extraction, and transcript extraction to an in-memory worker queue.
+
+The Telegram UX is Russian-language and menu based:
+
+1. A user sends a video URL.
+2. The bot replies quickly with `Проверяю ссылку и готовлю варианты...`.
+3. A background metadata job fetches `yt-dlp --dump-json` once and prepares the menu options.
+4. The bot sends a menu with actions for best video download, quality selection, MP3 extraction, transcript extraction, and cancellation.
+5. Menu actions enqueue worker jobs and report the accepted job ID.
 
 ### Scripts
 
@@ -121,12 +129,16 @@ TELEGRAM_BOT_TOKEN=123:token TELEGRAM_WEBHOOK_SECRET=dev_secret LOG_LEVEL=debug 
 curl http://localhost:3000/healthz
 ```
 
-When `TELEGRAM_WEBHOOK_URL` is set, startup registers the Telegram webhook and passes the required `TELEGRAM_WEBHOOK_SECRET` as `secret_token`.
+When `TELEGRAM_WEBHOOK_URL` is set, startup registers the Telegram webhook, passes the required `TELEGRAM_WEBHOOK_SECRET` as `secret_token`, and sets `allowed_updates` to `["message", "callback_query"]` so `@grammyjs/menu` callbacks are delivered.
 
 ### Operational Notes
 
-The official Telegram cloud Bot API has much smaller upload limits than a Local Telegram Bot API server. Use `TELEGRAM_API_ROOT` for local Bot API mode when large media delivery is required, and validate disk and network behavior before claiming large-file support.
+Menu sessions are stored in memory for 15 minutes and keyed by Telegram chat id plus the menu message id. Restarting the process clears active menu sessions, so users should resend the URL if an old menu stops working.
 
-Downloads use one temporary directory per job under `DOWNLOAD_DIR`. Transcript temporary files are cleaned before returning. Downloaded media is cleaned after the adapter consumes it; the current webhook foundation queues work and leaves the future Telegram delivery adapter as the owner of final send behavior.
+The official Telegram cloud Bot API has much smaller upload limits than a Local Telegram Bot API server. Use `TELEGRAM_API_ROOT` for local Bot API mode when large media delivery is required, and validate disk and network behavior before claiming large-file support. The Telegram UI only displays `too_large` when metadata says the expected output is strictly greater than 2 GiB. Unknown sizes are shown separately as unknown, and smaller server policy rejections use distinct server-limit or disk-limit text.
+
+Downloads use one temporary directory per job under `DOWNLOAD_DIR`. Downloaded media is sent back to the originating Telegram chat before cleanup runs. Transcript results are sent as a normal message when short enough and as a temporary `.txt` document when the transcript is too long; temporary transcript documents are cleaned up after success or failure.
+
+Set `LOG_LEVEL=debug` to inspect verbose menu/session/job diagnostics. Logs intentionally avoid bot tokens, webhook secrets, raw user URLs, full file contents, and full transcript text.
 
 Graceful shutdown handles `SIGINT` and `SIGTERM`, closes Fastify, stops accepting jobs, cancels active commands through `AbortSignal`, and runs temporary job cleanup.

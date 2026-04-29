@@ -3,11 +3,15 @@ import { normalizeError } from "../../core/errors.js";
 import { isValidUrl } from "../../core/validation.js";
 import { noopLogger, type Logger } from "../../core/logger.js";
 import type { JobService } from "../../core/jobs/job-service.js";
+import { telegramCopy } from "./copy.js";
+import type { TelegramMenuContext } from "./context.js";
+import type { DownloadMenus } from "./menus/download-menu.js";
 
 export type CreateTelegramBotOptions = {
   botToken: string;
   apiRoot?: string;
   jobService: JobService;
+  menus?: DownloadMenus;
   logger?: Logger;
 };
 
@@ -34,28 +38,33 @@ export async function handleTelegramTextMessage(
 ): Promise<void> {
   const text = ctx.message.text.trim();
   if (!isValidUrl(text)) {
-    await ctx.reply("Send a supported video URL to queue a download.");
+    logger.warn("telegram.text.invalid_url");
+    await ctx.reply(telegramCopy.invalidUrl);
     return;
   }
 
+  await ctx.reply(telegramCopy.analyzingUrl);
+  logger.info("telegram.metadata_prepare.acknowledged", { hasChatId: Boolean(ctx.chat.id) });
+
   try {
-    const job = await jobService.createDownloadJob({
-      url: text,
+    const job = await jobService.createMediaJob({
+      action: "prepare_metadata",
+      payload: { url: text },
       chatId: String(ctx.chat.id),
     });
-    await ctx.reply(`Queued download job ${job.id}.`);
+    logger.info("telegram.metadata_prepare.enqueued", { jobId: job.id, action: job.action, hasChatId: true });
   } catch (error) {
-    const normalized = normalizeError(error, "Could not queue download job");
+    const normalized = normalizeError(error, "Could not queue metadata job");
     const logDetails = { code: normalized.code, severity: normalized.severity };
 
     if (normalized.code === "QUEUE_FULL") {
       logger.warn("telegram.queue.rejected", logDetails);
-      await ctx.reply("Download queue is full. Try again later.");
+      await ctx.reply(telegramCopy.queueFull);
       return;
     }
 
     logger.error("telegram.queue.failed", logDetails);
-    await ctx.reply("Could not queue this download right now. Try again later.");
+    await ctx.reply(telegramCopy.metadataFailed);
   }
 }
 
@@ -63,20 +72,28 @@ export function createTelegramBot({
   botToken,
   apiRoot,
   jobService,
+  menus,
   logger = noopLogger,
-}: CreateTelegramBotOptions): Bot {
-  const bot = new Bot(botToken, apiRoot ? { client: { apiRoot } } : undefined);
+}: CreateTelegramBotOptions): Bot<TelegramMenuContext> {
+  const bot = new Bot<TelegramMenuContext>(botToken, apiRoot ? { client: { apiRoot } } : undefined);
 
   bot.use(async (ctx, next) => {
     logger.info("telegram.update.received", { updateId: ctx.update.update_id, type: updateType(ctx) });
     await next();
   });
 
+  if (menus) {
+    logger.info("telegram.menu.install");
+    bot.use(menus.rootMenu);
+  }
+
   bot.command("start", async (ctx) => {
-    await ctx.reply("Tuitube backend is running. Send a video URL to queue a download.");
+    logger.info("telegram.command.start");
+    await ctx.reply(telegramCopy.start);
   });
 
   bot.on("message:text", async (ctx) => {
+    logger.debug("telegram.text.route");
     await handleTelegramTextMessage(ctx, jobService, logger);
   });
 
