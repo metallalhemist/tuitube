@@ -87,7 +87,11 @@ export function getEstimatedFormatSize(format: Format): number | undefined {
   return format.filesize ?? format.filesize_approx;
 }
 
-export function chooseDownloadFormat(video: Video, requestedValue?: string): DownloadFormatChoice | undefined {
+export function chooseDownloadFormat(
+  video: Video,
+  requestedValue?: string,
+  isAllowed?: (format: Format) => boolean,
+): DownloadFormatChoice | undefined {
   const formats = getFormats(video);
   const allFormats = [...formats[videoKey], ...formats[audioOnlyKey]];
 
@@ -104,7 +108,7 @@ export function chooseDownloadFormat(video: Video, requestedValue?: string): Dow
     }
   }
 
-  const bestVideo = formats[videoKey][0];
+  const bestVideo = formats[videoKey].find((format) => isAllowed?.(format) ?? true);
   if (bestVideo) {
     return {
       format: bestVideo,
@@ -115,7 +119,7 @@ export function chooseDownloadFormat(video: Video, requestedValue?: string): Dow
     };
   }
 
-  const bestAudio = formats[audioOnlyKey][0];
+  const bestAudio = formats[audioOnlyKey].find((format) => isAllowed?.(format) ?? true);
   if (bestAudio) {
     return {
       format: bestAudio,

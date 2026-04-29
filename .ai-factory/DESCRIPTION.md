@@ -15,13 +15,14 @@ The project is an existing TypeScript package with a React-based Termcast comman
 - Extract subtitles through `yt-dlp`, convert them to SRT, and clean transcript text.
 - Provide Termcast AI tools for video download and transcript extraction.
 - Expose a Fastify health route and Telegram webhook route.
-- Queue Telegram download work in memory so webhook requests do not run long external commands inline.
+- Queue Telegram metadata, download, MP3, and transcript work in memory so webhook requests do not run long external commands inline.
+- Present Telegram URL actions through a Russian-language `@grammyjs/menu` flow with best video, quality selection, MP3 extraction, transcript extraction, and cancellation.
 
 ## Tech Stack
 
 - **Programming language:** TypeScript
 - **Runtime:** Node.js with ES modules
-- **Framework:** Termcast with React 19 JSX views; Fastify and grammY for the Telegram webhook backend
+- **Framework:** Termcast with React 19 JSX views; Fastify, grammY, and `@grammyjs/menu` for the Telegram webhook backend
 - **CLI/process integration:** `execa`, `node:child_process`, `yt-dlp`, `ffmpeg`, `ffprobe`, Homebrew, winget
 - **Validation and formatting:** `validator`, `date-fns`, `pretty-bytes`, `srt-parser-2`
 - **Build tooling:** `termcast build`, `termcast dev`, backend TypeScript compilation with `tsconfig.backend.json`, `tsx` for backend dev
@@ -40,7 +41,7 @@ The project is an existing TypeScript package with a React-based Termcast comman
 - Shared `yt-dlp` metadata types live in `src/types.ts`.
 - Backend-safe core services live under `src/core/`.
 - External command and filesystem adapters live under `src/integrations/`.
-- grammY adapter code lives under `src/adapters/telegram/`.
+- grammY adapter code, Russian copy helpers, result senders, menu session storage, and `@grammyjs/menu` definitions live under `src/adapters/telegram/`.
 - Fastify config, app factory, lifecycle, and process startup live under `src/server/`.
 - Functions and variables use camelCase, React components use PascalCase, and file names use kebab-case where modules are feature-oriented.
 

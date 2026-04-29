@@ -3,11 +3,12 @@ import { webhookCallback, type Bot } from "grammy";
 import { noopLogger, type Logger } from "../core/logger.js";
 import type { JobService } from "../core/jobs/job-service.js";
 import type { DownloadWorker } from "../core/jobs/download-worker.js";
+import type { TelegramMenuContext } from "../adapters/telegram/context.js";
 import type { ServerConfig } from "./config.js";
 
 export type CreateServerAppOptions = {
   config: ServerConfig;
-  bot: Bot;
+  bot: Bot<TelegramMenuContext>;
   jobService: JobService;
   worker?: DownloadWorker;
   logger?: Logger;

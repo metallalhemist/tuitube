@@ -1,16 +1,22 @@
 import { noopLogger, type Logger } from "../logger.js";
+import { MP3_FORMAT_ID } from "../format-selection.js";
 import type { VideoDownloadService } from "../services/video-download-service.js";
-import type { DownloadResult } from "../types.js";
-import type { DownloadJob, JobQueue } from "./queue.js";
+import type { TranscriptResult, TranscriptService } from "../services/transcript-service.js";
+import type { DownloadResult, VideoSelectionSnapshot } from "../types.js";
+import type { MediaJob, JobQueue } from "./queue.js";
 import { JobService } from "./job-service.js";
 
 export type DownloadWorkerOptions = {
-  queue: JobQueue<DownloadJob>;
+  queue: JobQueue<MediaJob>;
   jobService: JobService;
   downloadService: VideoDownloadService;
+  transcriptService?: TranscriptService;
   maxConcurrency?: number;
   logger?: Logger;
-  onJobCompleted?: (job: DownloadJob, result: DownloadResult) => Promise<void>;
+  onMetadataPrepared?: (job: MediaJob, snapshot: VideoSelectionSnapshot) => Promise<void>;
+  onJobCompleted?: (job: MediaJob, result: DownloadResult) => Promise<void>;
+  onTranscriptCompleted?: (job: MediaJob, result: TranscriptResult) => Promise<void>;
+  onJobFailed?: (job: MediaJob, error: unknown) => Promise<void>;
 };
 
 export type StopWorkerOptions = {
@@ -19,12 +25,16 @@ export type StopWorkerOptions = {
 };
 
 export class DownloadWorker {
-  private readonly queue: JobQueue<DownloadJob>;
+  private readonly queue: JobQueue<MediaJob>;
   private readonly jobService: JobService;
   private readonly downloadService: VideoDownloadService;
+  private readonly transcriptService?: TranscriptService;
   private readonly maxConcurrency: number;
   private readonly logger: Logger;
-  private readonly onJobCompleted?: (job: DownloadJob, result: DownloadResult) => Promise<void>;
+  private readonly onMetadataPrepared?: (job: MediaJob, snapshot: VideoSelectionSnapshot) => Promise<void>;
+  private readonly onJobCompleted?: (job: MediaJob, result: DownloadResult) => Promise<void>;
+  private readonly onTranscriptCompleted?: (job: MediaJob, result: TranscriptResult) => Promise<void>;
+  private readonly onJobFailed?: (job: MediaJob, error: unknown) => Promise<void>;
   private readonly loopControllers = new Set<AbortController>();
   private readonly activeControllers = new Map<string, AbortController>();
   private readonly loops: Promise<void>[] = [];
@@ -34,9 +44,13 @@ export class DownloadWorker {
     this.queue = options.queue;
     this.jobService = options.jobService;
     this.downloadService = options.downloadService;
+    this.transcriptService = options.transcriptService;
     this.maxConcurrency = options.maxConcurrency ?? 1;
     this.logger = options.logger ?? noopLogger;
+    this.onMetadataPrepared = options.onMetadataPrepared;
     this.onJobCompleted = options.onJobCompleted;
+    this.onTranscriptCompleted = options.onTranscriptCompleted;
+    this.onJobFailed = options.onJobFailed;
   }
 
   start(): void {
@@ -60,44 +74,103 @@ export class DownloadWorker {
     this.logger.debug("download_worker.loop.finish");
   }
 
-  private async runJob(job: DownloadJob): Promise<void> {
+  private async runJob(job: MediaJob): Promise<void> {
+    if (this.jobService.getJob(job.id)?.status === "cancelled") {
+      this.logger.debug("download_worker.job.skip_cancelled", { jobId: job.id, action: job.action });
+      return;
+    }
+
     const controller = new AbortController();
     this.activeControllers.set(job.id, controller);
     this.jobService.updateJob(job.id, "running", { startedAt: new Date() });
-    this.logger.info("download_worker.job.start", { jobId: job.id });
+    this.logger.info("download_worker.job.start", { jobId: job.id, action: job.action, hasChatId: Boolean(job.chatId) });
 
     let result: DownloadResult | undefined;
     try {
-      result = await this.downloadService.download({
-        url: job.url,
-        formatValue: job.formatValue,
-        cancelSignal: controller.signal,
-      });
-      await this.onJobCompleted?.(job, result);
-      this.jobService.updateJob(job.id, "completed", {
-        completedAt: new Date(),
-        result: {
-          filePath: result.filePath,
-          fileName: result.fileName,
-          title: result.title,
-          duration: result.duration,
-        },
-      });
-      this.logger.info("download_worker.job.finish", { jobId: job.id, fileName: result.fileName });
+      switch (job.action) {
+        case "prepare_metadata": {
+          this.logger.info("download_worker.dispatch", { jobId: job.id, action: job.action });
+          const snapshot = await this.downloadService.getSelectionSnapshot(job.payload.url, controller.signal);
+          await this.onMetadataPrepared?.(job, snapshot);
+          this.jobService.updateJob(job.id, "completed", {
+            completedAt: new Date(),
+            result: { type: "metadata", snapshot },
+          });
+          break;
+        }
+        case "download_best":
+        case "download_format":
+        case "extract_mp3": {
+          this.logger.info("download_worker.dispatch", { jobId: job.id, action: job.action });
+          result = await this.downloadService.download({
+            url: job.payload.url,
+            formatValue: job.action === "extract_mp3" ? MP3_FORMAT_ID : job.payload.formatValue,
+            cancelSignal: controller.signal,
+          });
+          await this.onJobCompleted?.(job, result);
+          this.jobService.updateJob(job.id, "completed", {
+            completedAt: new Date(),
+            result: {
+              type: "download",
+              download: {
+                filePath: result.filePath,
+                fileName: result.fileName,
+                title: result.title,
+                duration: result.duration,
+              },
+            },
+          });
+          break;
+        }
+        case "extract_transcript": {
+          this.logger.info("download_worker.dispatch", { jobId: job.id, action: job.action });
+          if (!this.transcriptService) {
+            throw new Error("Transcript service is not configured");
+          }
+          const transcript = await this.transcriptService.extract({
+            url: job.payload.url,
+            language: job.payload.language,
+            cancelSignal: controller.signal,
+          });
+          await this.onTranscriptCompleted?.(job, transcript);
+          this.jobService.updateJob(job.id, "completed", {
+            completedAt: new Date(),
+            result: { type: "transcript", transcript },
+          });
+          break;
+        }
+      }
+      this.logger.info("download_worker.job.finish", { jobId: job.id, action: job.action });
     } catch (error) {
       if (controller.signal.aborted) {
         this.jobService.cancelJob(job.id);
-        this.logger.warn("download_worker.job.cancelled", { jobId: job.id });
+        this.logger.warn("download_worker.job.cancelled", { jobId: job.id, action: job.action });
       } else {
-        this.jobService.failJob(job.id, error);
+        const failedJob = this.jobService.failJob(job.id, error);
         this.logger.error("download_worker.job.failed", {
           jobId: job.id,
+          action: job.action,
           error: error instanceof Error ? error.message : String(error),
         });
+        await this.notifyJobFailed(failedJob, error);
       }
     } finally {
       this.activeControllers.delete(job.id);
       await result?.cleanup();
+    }
+  }
+
+  private async notifyJobFailed(job: MediaJob | undefined, error: unknown): Promise<void> {
+    if (!job || job.status !== "failed") return;
+
+    try {
+      await this.onJobFailed?.(job, error);
+    } catch (notifyError) {
+      this.logger.error("download_worker.job.failure_callback_failed", {
+        jobId: job.id,
+        action: job.action,
+        error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+      });
     }
   }
 

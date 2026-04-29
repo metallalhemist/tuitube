@@ -46,8 +46,12 @@ src/
 │   └── filesystem.ts                 # DOWNLOAD_DIR, temp dirs, cleanup, safe paths
 ├── adapters/
 │   └── telegram/
-│       ├── bot.ts                    # grammY bot setup and queue handoff
-│       └── menus/                    # Future @grammyjs/menu UI adapter
+│       ├── bot.ts                    # grammY bot setup and queue/menu handoff
+│       ├── copy.ts                   # Russian Telegram copy and labels
+│       ├── menu-session-store.ts     # In-memory menu sessions with TTL
+│       ├── metadata-result-dispatcher.ts # Sends prepared menu messages
+│       ├── result-sender.ts          # Sends completed media/transcript results
+│       └── menus/                    # @grammyjs/menu UI adapter
 ├── server/
 │   ├── config.ts                     # Environment parsing and defaults
 │   ├── app.ts                        # Fastify instance and route registration
@@ -94,7 +98,7 @@ Adapters translate transport-specific input and output:
 
 - Termcast adapter maps React UI state and AI tool inputs into core service calls, then maps results/errors into Termcast UI, toasts, or serializable tool responses.
 - Telegram webhook adapter maps grammY updates into commands, enqueues jobs, and sends immediate acknowledgement messages.
-- Future Telegram menu adapter builds menu state and callbacks with `@grammyjs/menu`, then calls core services through adapter handlers.
+- Telegram menu adapter builds menu state and callbacks with `@grammyjs/menu`, then calls core services through adapter handlers.
 
 Adapters may import core services and integration composition objects. They must not move business policy into UI handlers.
 
@@ -223,15 +227,19 @@ The initial deployment target is 1 vCPU, 2 GB RAM, and 30 GB disk. Design for pr
 
 These constraints belong in core policy/config plus integration cleanup, not in individual UI handlers.
 
-## Future Telegram Menu UI Layer
+## Telegram Menu UI Layer
 
 The Telegram menu UI should be an adapter concern:
 
 ```text
-adapters/telegram/menus/
-├── download-menu.ts        # @grammyjs/menu menu definitions
-├── format-menu.ts          # Format option rendering and callback mapping
-└── menu-state.ts           # Adapter-level state projection
+adapters/telegram/
+├── menu-session-store.ts   # chat id + message id keyed in-memory sessions
+├── metadata-result-dispatcher.ts # background metadata result -> menu message
+├── result-sender.ts        # completed media/transcript -> Telegram messages
+└── menus/
+    ├── download-menu.ts    # @grammyjs/menu root menu definitions
+    ├── format-menu.ts      # dynamic format option rendering and callback mapping
+    └── menu-state.ts       # adapter-level state projection
 ```
 
 Rules:

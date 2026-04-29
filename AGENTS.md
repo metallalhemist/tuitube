@@ -25,7 +25,7 @@ Tuitube is a Termcast extension and Telegram backend foundation for downloading 
 │   ├── views/              # Termcast React support views
 │   ├── core/               # Backend-safe services, policy, jobs, validation, logging
 │   ├── integrations/       # External command and filesystem adapters
-│   ├── adapters/telegram/  # grammY bot construction and update handler
+│   ├── adapters/telegram/  # grammY bot, Russian copy, menu UI, sessions, result senders
 │   ├── server/             # Fastify app, env config, lifecycle, backend entrypoint
 │   ├── index.tsx           # Main interactive command
 │   ├── transcript.ts       # Subtitle download and transcript cleanup
@@ -52,6 +52,10 @@ Tuitube is a Termcast extension and Telegram backend foundation for downloading 
 | `src/server/app.ts`                           | Side-effect-light Fastify app factory for health and Telegram webhook routes.             |
 | `src/server/index.ts`                         | Backend process entrypoint for startup, webhook registration, and shutdown.               |
 | `src/adapters/telegram/bot.ts`                | Minimal grammY bot wiring and queue handoff.                                              |
+| `src/adapters/telegram/menus/download-menu.ts`| Telegram root menu for best video, quality, MP3, transcript, and cancellation actions.     |
+| `src/adapters/telegram/menu-session-store.ts` | In-memory Telegram menu session storage with 15 minute TTL.                               |
+| `src/adapters/telegram/metadata-result-dispatcher.ts` | Sends prepared metadata menus after background snapshot jobs complete.          |
+| `src/adapters/telegram/result-sender.ts`      | Sends completed media/transcript results back to Telegram and cleans temporary documents.  |
 | `src/utils.ts`                                | Shared executable lookup, URL/time validation, format formatting, and title sanitization. |
 | `package.json`                                | Package metadata, commands, tools, preferences, scripts, and AI evals.                    |
 

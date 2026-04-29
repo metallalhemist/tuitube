@@ -11,7 +11,7 @@ import {
 import { createTempJobDirectory } from "../jobs/temp-job.js";
 import { TuitubeError } from "../errors.js";
 import { noopLogger, type Logger } from "../logger.js";
-import type { DownloadResult, SerializableFormatOption, Video } from "../types.js";
+import type { DownloadResult, SerializableFormatOption, Video, VideoSelectionSnapshot } from "../types.js";
 import { getFreeDiskSpaceBytes } from "../../integrations/filesystem.js";
 import { downloadVideo, fetchVideoMetadata } from "../../integrations/yt-dlp.js";
 
@@ -88,6 +88,26 @@ export class VideoDownloadService {
     return options;
   }
 
+  async getSelectionSnapshot(url: string, cancelSignal?: AbortSignal): Promise<VideoSelectionSnapshot> {
+    this.logger.debug("video_download.selection_snapshot.start");
+    const video = await this.getMetadata(url, cancelSignal);
+    const freeBytes = await this.getPolicyFreeDiskBytes();
+    const formatOptions = buildSerializableFormatOptions(video, (format) =>
+      evaluateDownloadPolicy({ format, video, policy: this.policy, freeDiskBytes: freeBytes }),
+    );
+
+    this.logger.debug("video_download.selection_snapshot.finish", {
+      duration: video.duration,
+      formatCount: formatOptions.length,
+    });
+
+    return {
+      title: video.title,
+      duration: video.duration,
+      formatOptions,
+    };
+  }
+
   async download({
     url,
     formatValue,
@@ -100,7 +120,17 @@ export class VideoDownloadService {
 
     try {
       const video = await this.getMetadata(url, cancelSignal);
-      const choice = chooseDownloadFormat(video, formatValue);
+      const freeBytes = await this.getPolicyFreeDiskBytes();
+      const choice =
+        chooseDownloadFormat(video, formatValue, (format) => {
+          const state = evaluateDownloadPolicy({
+            format,
+            video,
+            policy: this.policy,
+            freeDiskBytes: freeBytes,
+          });
+          return !state.disabled;
+        }) ?? chooseDownloadFormat(video, formatValue);
       if (!choice) {
         throw new TuitubeError({
           code: "DOWNLOAD_FAILED",
@@ -114,7 +144,6 @@ export class VideoDownloadService {
         reason: choice.reason,
       });
 
-      const freeBytes = await this.getPolicyFreeDiskBytes();
       const policyState = evaluateDownloadPolicy({
         format: choice.format,
         video,
