@@ -49,10 +49,7 @@ export async function renderMenuMarkup<C extends TelegramMenuContext>(
   };
 }
 
-export function createSyntheticMenuContext(
-  chatId: string,
-  messageId: number,
-): TelegramMenuContext {
+export function createSyntheticMenuContext(chatId: string, messageId: number): TelegramMenuContext {
   return {
     callbackQuery: {
       message: {

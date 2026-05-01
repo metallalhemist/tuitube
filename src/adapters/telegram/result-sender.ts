@@ -19,7 +19,11 @@ import {
 
 export type TelegramResultApi = {
   sendDocument(chatId: string, file: unknown, options?: { caption?: string }): Promise<unknown>;
-  sendVideo(chatId: string, file: unknown, options?: { caption?: string; supports_streaming?: boolean }): Promise<unknown>;
+  sendVideo(
+    chatId: string,
+    file: unknown,
+    options?: { caption?: string; supports_streaming?: boolean },
+  ): Promise<unknown>;
   sendMessage(chatId: string, text: string): Promise<unknown>;
 };
 
@@ -167,7 +171,12 @@ export class TelegramResultSender {
         jobId: job.id,
         error: sanitizeTelegramError(error),
       });
-      await this.notifyAlreadyAndThrow(job.chatId, jobFailedText(undefined), "Telegram transcript delivery failed", error);
+      await this.notifyAlreadyAndThrow(
+        job.chatId,
+        jobFailedText(undefined),
+        "Telegram transcript delivery failed",
+        error,
+      );
     } finally {
       this.logger.debug("telegram.result_sender.transcript.cleanup", { jobId: job.id });
       await rm(tempDirectory, { recursive: true, force: true });
@@ -197,18 +206,18 @@ export class TelegramResultSender {
         error: sanitizeTelegramError(error),
       });
       if (job.chatId) {
-        await this.notifyAlreadyAndThrow(job.chatId, telegramCopy.sendingFileFailed, "Could not inspect Telegram upload file", error);
+        await this.notifyAlreadyAndThrow(
+          job.chatId,
+          telegramCopy.sendingFileFailed,
+          "Could not inspect Telegram upload file",
+          error,
+        );
       }
       throw error;
     }
   }
 
-  private async notifyAlreadyAndThrow(
-    chatId: string,
-    text: string,
-    message: string,
-    cause?: unknown,
-  ): Promise<never> {
+  private async notifyAlreadyAndThrow(chatId: string, text: string, message: string, cause?: unknown): Promise<never> {
     try {
       await this.options.api.sendMessage(chatId, text);
     } catch (notificationError) {
@@ -245,7 +254,9 @@ function telegramErrorStatusCode(error: unknown): number | undefined {
     record.response?.statusCode,
     record.response?.error_code,
   ];
-  return candidates.find((candidate): candidate is number => typeof candidate === "number" && Number.isFinite(candidate));
+  return candidates.find(
+    (candidate): candidate is number => typeof candidate === "number" && Number.isFinite(candidate),
+  );
 }
 
 function telegramErrorText(error: unknown): string {

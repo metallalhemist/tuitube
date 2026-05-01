@@ -30,7 +30,10 @@ export type DownloadMenus = {
   containerMenu: Menu<TelegramMenuContext>;
   qualityMenu: Menu<TelegramMenuContext>;
   audioMenu: Menu<TelegramMenuContext>;
-  renderRootMenuMarkup(chatId: string, messageId: number): Promise<{
+  renderRootMenuMarkup(
+    chatId: string,
+    messageId: number,
+  ): Promise<{
     inline_keyboard: import("grammy/types").InlineKeyboardButton[][];
   }>;
 };
@@ -63,7 +66,9 @@ export function createDownloadMenus({
   const runFormatSelection = (option: SerializableFormatOption) => async (ctx: TelegramMenuContext) => {
     const lookup = getMenuSessionLookup(ctx, store);
     if (lookup.status !== "found") {
-      await ctx.answerCallbackQuery(lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession);
+      await ctx.answerCallbackQuery(
+        lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession,
+      );
       ctx.menu.close();
       return;
     }
@@ -149,7 +154,9 @@ export function createDownloadMenus({
         await ctx.answerCallbackQuery(telegramCopy.callbackAccepted);
         return;
       }
-      await ctx.answerCallbackQuery(lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession);
+      await ctx.answerCallbackQuery(
+        lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession,
+      );
     })
     .row()
     .submenu(telegramButtons.audio, DOWNLOAD_AUDIO_MENU_ID, async (ctx) => {
@@ -164,13 +171,17 @@ export function createDownloadMenus({
         return;
       }
       logger.warn("telegram.menu.root.open_audio_missing", { status: lookup.status });
-      await ctx.answerCallbackQuery(lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession);
+      await ctx.answerCallbackQuery(
+        lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession,
+      );
     })
     .row()
     .text(telegramButtons.cancel, async (ctx) => {
       const lookup = getMenuSessionLookup(ctx, store);
       if (lookup.status !== "found") {
-        await ctx.answerCallbackQuery(lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession);
+        await ctx.answerCallbackQuery(
+          lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession,
+        );
         ctx.menu.close();
         return;
       }

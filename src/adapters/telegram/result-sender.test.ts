@@ -40,11 +40,13 @@ async function withDownloadFile<T>(
   }
 }
 
-function createApi(overrides: Partial<{
-  sendDocument: ReturnType<typeof vi.fn>;
-  sendVideo: ReturnType<typeof vi.fn>;
-  sendMessage: ReturnType<typeof vi.fn>;
-}> = {}) {
+function createApi(
+  overrides: Partial<{
+    sendDocument: ReturnType<typeof vi.fn>;
+    sendVideo: ReturnType<typeof vi.fn>;
+    sendMessage: ReturnType<typeof vi.fn>;
+  }> = {},
+) {
   return {
     sendDocument: vi.fn(async () => undefined),
     sendVideo: vi.fn(async () => undefined),
@@ -144,9 +146,9 @@ describe("TelegramResultSender", () => {
     });
     const sender = new TelegramResultSender({ api });
 
-    await expect(withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(job, download))).rejects.toBeInstanceOf(
-      TelegramResultAlreadyNotifiedError,
-    );
+    await expect(
+      withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(job, download)),
+    ).rejects.toBeInstanceOf(TelegramResultAlreadyNotifiedError);
     expect(api.sendMessage).toHaveBeenCalledWith("123", expect.stringContaining("слишком большой"));
   });
 

@@ -78,10 +78,7 @@ export class TelegramMetadataResultDispatcher {
         firstScreenMp4Count: snapshot.formatOptions.filter(isFirstScreenMp4Option).length,
       });
       const messageText = telegramCopy.mainMenuTitle(snapshot.title, snapshot.duration, { hasMp4WithoutRecoding });
-      const sentMessage = await this.options.api.sendMessage(
-        job.chatId,
-        messageText,
-      );
+      const sentMessage = await this.options.api.sendMessage(job.chatId, messageText);
       this.options.store.create({
         chatId: job.chatId,
         messageId: sentMessage.message_id,
@@ -92,12 +89,9 @@ export class TelegramMetadataResultDispatcher {
       });
 
       const replyMarkup = await this.options.menus.renderRootMenuMarkup(job.chatId, sentMessage.message_id);
-      await this.options.api.editMessageText(
-        job.chatId,
-        sentMessage.message_id,
-        messageText,
-        { reply_markup: replyMarkup },
-      );
+      await this.options.api.editMessageText(job.chatId, sentMessage.message_id, messageText, {
+        reply_markup: replyMarkup,
+      });
 
       this.logger.info("telegram.metadata_dispatch.finish", {
         jobId: job.id,

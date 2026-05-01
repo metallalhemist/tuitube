@@ -57,12 +57,9 @@ describe("TelegramMetadataResultDispatcher", () => {
 
     expect(store.get({ chatId: "123", messageId: 77 }).status).toBe("found");
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
-    expect(api.editMessageText).toHaveBeenCalledWith(
-      "123",
-      77,
-      expect.stringContaining("Видео: Title"),
-      { reply_markup: { inline_keyboard: [] } },
-    );
+    expect(api.editMessageText).toHaveBeenCalledWith("123", 77, expect.stringContaining("Видео: Title"), {
+      reply_markup: { inline_keyboard: [] },
+    });
   });
 
   it("reports preparation failures without leaking internal errors", async () => {
@@ -108,7 +105,12 @@ describe("TelegramMetadataResultDispatcher", () => {
     const messageText = api.sendMessage.mock.calls[0]?.[1];
     const replyMarkup = api.editMessageText.mock.calls[0]?.[3]?.reply_markup;
     expect(messageText).toContain("MP4 для отправки сейчас недоступен");
-    expect(replyMarkup?.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("лимит Telegram");
+    expect(
+      replyMarkup?.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("лимит Telegram");
   });
 
   it("allows over-cloud-limit menu options in Local Bot API mode", async () => {
@@ -139,6 +141,11 @@ describe("TelegramMetadataResultDispatcher", () => {
     const messageText = api.sendMessage.mock.calls[0]?.[1];
     const replyMarkup = api.editMessageText.mock.calls[0]?.[3]?.reply_markup;
     expect(messageText).not.toContain("MP4 для отправки сейчас недоступен");
-    expect(replyMarkup?.inline_keyboard.flat().map((button) => button.text).join(" ")).not.toContain("лимит Telegram");
+    expect(
+      replyMarkup?.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).not.toContain("лимит Telegram");
   });
 });

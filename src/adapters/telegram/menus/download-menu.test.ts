@@ -86,10 +86,9 @@ describe("download menu", () => {
       [{ label: "360p" }, { label: "720p" }],
       [{ label: "1080p" }],
     ]);
-    expect(layoutMenuRows([{ label: "720p - недоступно: ограничение сервера" }, { label: "M4A" }, { label: "MP3" }])).toEqual([
-      [{ label: "720p - недоступно: ограничение сервера" }],
-      [{ label: "M4A" }, { label: "MP3" }],
-    ]);
+    expect(
+      layoutMenuRows([{ label: "720p - недоступно: ограничение сервера" }, { label: "M4A" }, { label: "MP3" }]),
+    ).toEqual([[{ label: "720p - недоступно: ограничение сервера" }], [{ label: "M4A" }, { label: "MP3" }]]);
   });
 
   it("renders root actions and dynamic quality options from the session store", async () => {
@@ -102,7 +101,14 @@ describe("download menu", () => {
       duration: 30,
       formatOptions: [
         enabledOption,
-        { ...enabledOption, id: "137+140#mp4", value: "137+140#mp4", formatId: "137+140", height: 1080, resolution: "1080p" },
+        {
+          ...enabledOption,
+          id: "137+140#mp4",
+          value: "137+140#mp4",
+          formatId: "137+140",
+          height: 1080,
+          resolution: "1080p",
+        },
         webmOption,
         m4aOption,
         opusOption,
@@ -116,7 +122,12 @@ describe("download menu", () => {
     });
 
     const rootMarkup = await menus.renderRootMenuMarkup("123", 10);
-    expect(rootMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("360p");
+    expect(
+      rootMarkup.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("360p");
     expect(rootMarkup.inline_keyboard[0]).toHaveLength(2);
     expect(rootMarkup.inline_keyboard.flat().map((button) => button.text)).toContain("Другие форматы");
     expect(rootMarkup.inline_keyboard.flat().map((button) => button.text)).toContain("Извлечь аудио");
@@ -131,12 +142,32 @@ describe("download menu", () => {
 
     store.update({ chatId: "123", messageId: 10 }, { state: "quality", selectedContainer: "webm" });
     const qualityMarkup = await renderMenuMarkup(menus.qualityMenu, createSyntheticMenuContext("123", 10));
-    expect(qualityMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("720p");
+    expect(
+      qualityMarkup.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("720p");
 
     const audioMarkup = await renderMenuMarkup(menus.audioMenu, createSyntheticMenuContext("123", 10));
-    expect(audioMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("M4A");
-    expect(audioMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("OPUS");
-    expect(audioMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("MP3");
+    expect(
+      audioMarkup.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("M4A");
+    expect(
+      audioMarkup.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("OPUS");
+    expect(
+      audioMarkup.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("MP3");
   });
 
   it("keeps long rendered root, video, and audio labels on one-button rows", async () => {
@@ -218,6 +249,11 @@ describe("download menu", () => {
     });
 
     const rootMarkup = await menus.renderRootMenuMarkup("123", 11);
-    expect(rootMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("unknown");
+    expect(
+      rootMarkup.inline_keyboard
+        .flat()
+        .map((button) => button.text)
+        .join(" "),
+    ).toContain("unknown");
   });
 });

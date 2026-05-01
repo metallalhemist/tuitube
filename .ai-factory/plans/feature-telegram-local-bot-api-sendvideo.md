@@ -134,7 +134,7 @@ Open questions:
   - [ ] Logging requirements: tests should assert logs contain reason codes but not full file paths, tokens, raw URLs, or file contents.
   - [ ] Dependencies: tasks 1-3 and 9.
 
-- [ ] Task 12: Run quality gates and update docs/deploy notes.
+- [x] Task 12: Run quality gates and update docs/deploy notes.
   - [ ] Deliverable: run verification, update docs, and write deployment/smoke/rollback notes.
   - [ ] Expected behavior: `npm run backend:build` and `npm run test:core` pass. Attempt `npm run build` if the local environment supports the required Termcast/Bun toolchain, and report any environment-only blocker. Also run explicit source checks for the architecture boundary (`src/core` must not import grammY/Fastify/Termcast/React/`@grammyjs/menu`) and no-recode behavior (`downloadFormatArgs` and runtime source must not add active `--recode-video` or automatic transcoding). README/docs describe `TELEGRAM_API_ROOT=http://127.0.0.1:18081`, root URL without `/bot<TOKEN>`, cloud 50 MB vs local 2000 MB upload limits, `MAX_FILE_SIZE_MB` as operational download policy, Local Bot API requirement for files over 50 MB, Docker mount caveat for local paths/file URI, PM2 deployment, smoke tests for small MP4, >50 MB MP4 with local API, WEBM, and audio option, plus rollback by removing `TELEGRAM_API_ROOT` and using Telegram `logOut`/migration handling as appropriate. Deployment instructions must not touch other PM2 processes and should restart only `tuitube-bot` with `pm2 restart tuitube-bot --update-env`.
   - [ ] Files: `README.md`, optional `docs/*`, touched source/test files only.
@@ -143,16 +143,16 @@ Open questions:
 
 ## Quality Gates
 
-- [ ] Boundary check: `src/core` imports no grammY, Fastify, Termcast, React, or `@grammyjs/menu`.
-- [ ] No recode/transcode check: `downloadFormatArgs` still never emits `--recode-video`, and implementation does not add automatic ffmpeg transcoding.
-- [ ] Upload-limit check: files over 50 MB are considered Telegram-sendable only when `TELEGRAM_API_ROOT` enables Local Bot API mode; local mode still caps sends at 2000 MB.
-- [ ] Result-sender check: actual file size is checked with `fs.stat` before upload; `.mp4` uses `sendVideo` with `supports_streaming: true`; non-MP4 uses `sendDocument`.
-- [ ] Menu check: root shows MP4 video options, `Другие форматы`, `Извлечь аудио`, and `Отмена`; root does not show `Извлечь MP3` or `Извлечь расшифровку`.
-- [ ] Other Formats check: video containers only; no audio-only entries; MP4 exclusion/fallback behavior matches root MP4 availability; WEBM video is labeled `WEBM`.
-- [ ] Audio check: audio menu contains audio-only M4A/OPUS/WEBM audio/MP3 options and enqueues `download_format` with the selected `formatValue`.
-- [ ] Copy check: unknown-size button labels omit `неизвестный размер`; known sizes render quality/container plus MiB/GiB.
-- [ ] Secret/log check: no bot tokens, webhook secrets, raw Bot API URLs, raw user URLs, file contents, transcript contents, or risky full paths are logged.
-- [ ] Verification commands: `npm run backend:build`, `npm run test:core`, and `npm run build` when local dependencies are available.
+- [x] Boundary check: `src/core` imports no grammY, Fastify, Termcast, React, or `@grammyjs/menu`.
+- [x] No recode/transcode check: `downloadFormatArgs` still never emits `--recode-video`, and implementation does not add automatic ffmpeg transcoding.
+- [x] Upload-limit check: files over 50 MB are considered Telegram-sendable only when `TELEGRAM_API_ROOT` enables Local Bot API mode; local mode still caps sends at 2000 MB.
+- [x] Result-sender check: actual file size is checked with `fs.stat` before upload; `.mp4` uses `sendVideo` with `supports_streaming: true`; non-MP4 uses `sendDocument`.
+- [x] Menu check: root shows MP4 video options, `Другие форматы`, `Извлечь аудио`, and `Отмена`; root does not show `Извлечь MP3` or `Извлечь расшифровку`.
+- [x] Other Formats check: video containers only; no audio-only entries; MP4 exclusion/fallback behavior matches root MP4 availability; WEBM video is labeled `WEBM`.
+- [x] Audio check: audio menu contains audio-only M4A/OPUS/WEBM audio/MP3 options and enqueues `download_format` with the selected `formatValue`.
+- [x] Copy check: unknown-size button labels omit `неизвестный размер`; known sizes render quality/container plus MiB/GiB.
+- [x] Secret/log check: no bot tokens, webhook secrets, raw Bot API URLs, raw user URLs, file contents, transcript contents, or risky full paths are logged.
+- [x] Verification commands: `npm run backend:build`, `npm run test:core`, and `npm run build` when local dependencies are available. `npm run build` was attempted but the local environment is missing `bun`.
 
 ## Implementation Notes
 

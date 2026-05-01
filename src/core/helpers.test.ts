@@ -24,7 +24,12 @@ import { createTempJobDirectory } from "./jobs/temp-job.js";
 import type { Format, Video } from "./types.js";
 import { downloadFormatArgs, fetchVideoMetadata, parsePrintedFilePath } from "../integrations/yt-dlp.js";
 import { resolvePublicAddress } from "../integrations/egress-proxy.js";
-import { mapProcessFailure, processFailureToError, redactCommandOutput, runBufferedCommand } from "../integrations/process.js";
+import {
+  mapProcessFailure,
+  processFailureToError,
+  redactCommandOutput,
+  runBufferedCommand,
+} from "../integrations/process.js";
 
 const audio: Format = {
   format_id: "140",
@@ -208,10 +213,12 @@ describe("core helpers", () => {
       ],
     });
 
-    expect(getRootMp4FormatOptions(options).every((option) => option.container === "mp4" && option.kind !== "audio")).toBe(
-      true,
+    expect(
+      getRootMp4FormatOptions(options).every((option) => option.container === "mp4" && option.kind !== "audio"),
+    ).toBe(true);
+    expect(getVideoFormatContainers(options, { includeMp4: true }).map((container) => container.label)).toContain(
+      "WEBM",
     );
-    expect(getVideoFormatContainers(options, { includeMp4: true }).map((container) => container.label)).toContain("WEBM");
     expect(getVideoFormatContainers(options, { includeMp4: true }).map((container) => container.label)).not.toContain(
       "WEBM Audio",
     );

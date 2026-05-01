@@ -27,8 +27,7 @@ function formatTelegramBytesIfKnown(bytes: number | undefined): string | undefin
 }
 
 export const telegramCopy = {
-  start:
-    "Привет. Пришлите ссылку на видео, и я покажу MP4, другие форматы и аудио для скачивания.",
+  start: "Привет. Пришлите ссылку на видео, и я покажу MP4, другие форматы и аудио для скачивания.",
   invalidUrl: "Не похоже на поддерживаемую ссылку. Пришлите полный URL, начинающийся с http:// или https://.",
   analyzingUrl: "Проверяю ссылку и готовлю варианты...",
   metadataFailed: "Не удалось подготовить варианты для этой ссылки. Попробуйте другую ссылку позже.",
@@ -95,7 +94,10 @@ export function formatOptionButtonLabel(
   displayPolicy?: TelegramDisplayPolicyState,
 ): string {
   const size = formatTelegramBytesIfKnown(option.estimatedSizeBytes);
-  const quality = option.kind === "audio" || option.value === MP3_FORMAT_ID ? audioFormatButtonLabel(option) : videoFormatButtonLabel(option);
+  const quality =
+    option.kind === "audio" || option.value === MP3_FORMAT_ID
+      ? audioFormatButtonLabel(option)
+      : videoFormatButtonLabel(option);
   const reason = displayPolicy?.reason !== "allowed" ? displayPolicy?.reason : option.disabledReason;
   const suffix =
     reason && reason !== "unknown_size" && (option.disabled || displayPolicy?.disabled)
@@ -104,13 +106,17 @@ export function formatOptionButtonLabel(
   return `${size ? `${quality} · ${size}` : quality}${suffix}`;
 }
 
-export function videoFormatButtonLabel(option: Pick<SerializableFormatOption, "container" | "extension" | "height" | "resolution">): string {
+export function videoFormatButtonLabel(
+  option: Pick<SerializableFormatOption, "container" | "extension" | "height" | "resolution">,
+): string {
   if (option.height) return `${option.height}p`;
   if (option.resolution && option.resolution !== "audio only") return option.resolution;
   return (option.container ?? option.extension).toUpperCase();
 }
 
-export function audioFormatButtonLabel(option: Pick<SerializableFormatOption, "container" | "extension" | "value">): string {
+export function audioFormatButtonLabel(
+  option: Pick<SerializableFormatOption, "container" | "extension" | "value">,
+): string {
   if (option.value === MP3_FORMAT_ID) return "MP3";
   const container = (option.container ?? option.extension).toLowerCase();
   if (container === "webm" || container === "weba") return "WEBM Audio";

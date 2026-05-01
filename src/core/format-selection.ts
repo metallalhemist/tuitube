@@ -111,9 +111,7 @@ export function classifyFormat(format: Format): FormatKind {
   const explicitlyVideoOnly = acodec === "none" || formatNote.includes("video only");
 
   const hasVideo =
-    (vcodec !== "" && vcodec !== "none") ||
-    hasWidthHeight ||
-    (!explicitlyAudioOnly && isVideoContainer(ext));
+    (vcodec !== "" && vcodec !== "none") || hasWidthHeight || (!explicitlyAudioOnly && isVideoContainer(ext));
 
   const hasAudio = acodec !== "" && acodec !== "none";
 
@@ -416,15 +414,11 @@ type SerializableFormatOptionContainerView = Pick<
   "container" | "containerLabel" | "extension" | "kind" | "value"
 >;
 
-function optionContainer(
-  option: Pick<SerializableFormatOption, "container" | "extension">,
-): string | undefined {
+function optionContainer(option: Pick<SerializableFormatOption, "container" | "extension">): string | undefined {
   return option.container ?? option.extension;
 }
 
-export function isAudioOnlyFormatOption(
-  option: Pick<SerializableFormatOption, "kind" | "value">,
-): boolean {
+export function isAudioOnlyFormatOption(option: Pick<SerializableFormatOption, "kind" | "value">): boolean {
   return option.kind === "audio" || option.value === MP3_FORMAT_ID;
 }
 
@@ -536,7 +530,9 @@ export function buildSerializableFormatOption(
     formatValue: getFormatValue(planOrFormat),
     rank: 0,
     height: formatHeight(planOrFormat),
-    qualityLabel: formatHeight(planOrFormat) ? videoQualityLabel(formatHeight(planOrFormat) ?? 0) : audioQualityLabel(planOrFormat),
+    qualityLabel: formatHeight(planOrFormat)
+      ? videoQualityLabel(formatHeight(planOrFormat) ?? 0)
+      : audioQualityLabel(planOrFormat),
   });
   return buildSerializableFormatOptionFromPlan(plan, policy);
 }

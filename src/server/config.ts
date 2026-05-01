@@ -124,7 +124,9 @@ export function loadServerConfig(env: Record<string, string | undefined> = proce
     throw new TuitubeError({
       code: "INVALID_CONFIG",
       message:
-        error instanceof TelegramApiRootConfigError ? error.message : "TELEGRAM_API_ROOT must be a valid Bot API root URL",
+        error instanceof TelegramApiRootConfigError
+          ? error.message
+          : "TELEGRAM_API_ROOT must be a valid Bot API root URL",
       severity: "warn",
     });
   }

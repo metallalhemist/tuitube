@@ -141,42 +141,44 @@ export function createFormatMenu({
       for (const item of row) {
         const option = item.option;
         const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
-      dynamicRange.text(item.label, async (callbackCtx) => {
-        logger.debug("telegram.menu.format.action", {
-          sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
-          formatId: option.formatId,
-          disabled: option.disabled || displayPolicy.disabled,
-          reason: option.disabledReason ?? displayPolicy.reason,
-        });
-
-        if (option.disabled || displayPolicy.disabled) {
-          await callbackCtx.answerCallbackQuery(telegramCopy.callbackDisabled);
-          return;
-        }
-
-        let created: { jobId: string };
-        try {
-          created = await onFormatSelected({
-            ctx: callbackCtx,
-            session: lookup.session,
-            formatValue: option.value,
-          });
-        } catch (error) {
-          const normalized = normalizeError(error);
-          logger.warn("telegram.menu.format.action_failed", { code: normalized.code, formatId: option.formatId });
-          await callbackCtx.answerCallbackQuery(normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed);
-          return;
-        }
-
-        store.update(lookup.key, { activeJobId: created.jobId, state: "closed" });
-        callbackCtx.menu.close();
-        await callbackCtx.answerCallbackQuery(telegramCopy.callbackAccepted).catch((error: unknown) => {
-          logger.warn("telegram.menu.format.answer_failed", {
+        dynamicRange.text(item.label, async (callbackCtx) => {
+          logger.debug("telegram.menu.format.action", {
+            sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
             formatId: option.formatId,
-            error: error instanceof Error ? error.message : String(error),
+            disabled: option.disabled || displayPolicy.disabled,
+            reason: option.disabledReason ?? displayPolicy.reason,
+          });
+
+          if (option.disabled || displayPolicy.disabled) {
+            await callbackCtx.answerCallbackQuery(telegramCopy.callbackDisabled);
+            return;
+          }
+
+          let created: { jobId: string };
+          try {
+            created = await onFormatSelected({
+              ctx: callbackCtx,
+              session: lookup.session,
+              formatValue: option.value,
+            });
+          } catch (error) {
+            const normalized = normalizeError(error);
+            logger.warn("telegram.menu.format.action_failed", { code: normalized.code, formatId: option.formatId });
+            await callbackCtx.answerCallbackQuery(
+              normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed,
+            );
+            return;
+          }
+
+          store.update(lookup.key, { activeJobId: created.jobId, state: "closed" });
+          callbackCtx.menu.close();
+          await callbackCtx.answerCallbackQuery(telegramCopy.callbackAccepted).catch((error: unknown) => {
+            logger.warn("telegram.menu.format.answer_failed", {
+              formatId: option.formatId,
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
         });
-      });
       }
       dynamicRange.row();
     }
@@ -268,7 +270,9 @@ export function createAudioMenu({
           } catch (error) {
             const normalized = normalizeError(error);
             logger.warn("telegram.menu.audio.action_failed", { code: normalized.code, formatId: option.formatId });
-            await callbackCtx.answerCallbackQuery(normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed);
+            await callbackCtx.answerCallbackQuery(
+              normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed,
+            );
             return;
           }
 

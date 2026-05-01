@@ -83,7 +83,11 @@ export class DownloadWorker {
     const controller = new AbortController();
     this.activeControllers.set(job.id, controller);
     this.jobService.updateJob(job.id, "running", { startedAt: new Date() });
-    this.logger.info("download_worker.job.start", { jobId: job.id, action: job.action, hasChatId: Boolean(job.chatId) });
+    this.logger.info("download_worker.job.start", {
+      jobId: job.id,
+      action: job.action,
+      hasChatId: Boolean(job.chatId),
+    });
 
     let result: DownloadResult | undefined;
     try {
