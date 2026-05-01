@@ -1,8 +1,10 @@
 export class TelegramResultAlreadyNotifiedError extends Error {
-  constructor(message: string, options: { cause?: unknown } = {}) {
+  readonly reason?: string;
+
+  constructor(message: string, options: { reason?: string } = {}) {
     super(message);
     this.name = "TelegramResultAlreadyNotifiedError";
-    this.cause = options.cause;
+    this.reason = options.reason;
   }
 }
 

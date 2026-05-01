@@ -160,3 +160,7 @@ Open questions:
 - Treat Local Bot API local path/file URI upload as an optimization, not the default. In Docker, both the bot process and Bot API server must see the same absolute path; if that is not guaranteed, `InputFile` streaming is the safer default.
 - Keep `TELEGRAM_API_ROOT` as the single public env knob. Do not add `TELEGRAM_BOT_API_URL` unless implementation discovers a concrete incompatibility that cannot be solved by documenting `apiRoot` root URL semantics.
 - Optional future enhancement: add `ffprobe` validation for MP4 container/codecs before `sendVideo`, but do not make it a V1 gate and do not transcode failed probes automatically.
+
+## Rework Notes
+
+- 2026-05-01: Addressed the reopened log-safety blocker by redacting absolute/file paths in Telegram error sanitization, logging safe reason/status fields for stat/upload/transcript notification failures, and rethrowing safe notification-failure errors instead of raw upload/stat causes. Verification passed with `npx vitest run src/adapters/telegram/result-sender.test.ts`, `npx eslint src/adapters/telegram/result-sender.ts src/adapters/telegram/result-sender.test.ts src/adapters/telegram/result-errors.ts`, `npm run backend:build`, and `npm run test:core`.

@@ -13,7 +13,6 @@ import {
   createTelegramUploadPolicy,
   TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES,
   TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES,
-  type TelegramUploadMode,
   type TelegramUploadPolicy,
 } from "./upload-limits.js";
 
@@ -79,6 +78,7 @@ export class TelegramResultSender {
         jobId: job.id,
         action: job.action,
         mediaKind,
+        extension,
         uploadMode: uploadPolicy.mode,
         limitBytes: uploadPolicy.limitBytes,
         sizeBucket: sizeBucket(fileSizeBytes),
@@ -118,7 +118,9 @@ export class TelegramResultSender {
           jobId: job.id,
           action: job.action,
           mediaKind,
+          extension,
           uploadMode: uploadPolicy.mode,
+          sizeBucket: sizeBucket(fileSizeBytes),
           reason: tooLargeReason,
           statusCode: telegramErrorStatusCode(error),
         });
@@ -134,8 +136,11 @@ export class TelegramResultSender {
         jobId: job.id,
         action: job.action,
         mediaKind,
+        extension,
         uploadMode: uploadPolicy.mode,
+        sizeBucket: sizeBucket(fileSizeBytes),
         statusCode: telegramErrorStatusCode(error),
+        reason: telegramErrorReasonCode(error),
         error: sanitizeTelegramError(error),
       });
       await this.notifyAlreadyAndThrow(job.chatId, telegramCopy.sendingFileFailed, "Telegram upload failed", error);
@@ -169,6 +174,7 @@ export class TelegramResultSender {
     } catch (error) {
       this.logger.error("telegram.result_sender.transcript.failed", {
         jobId: job.id,
+        reason: telegramErrorReasonCode(error),
         error: sanitizeTelegramError(error),
       });
       await this.notifyAlreadyAndThrow(
@@ -186,7 +192,18 @@ export class TelegramResultSender {
   async sendFailure(job: MediaJob): Promise<void> {
     if (!job.chatId) return;
     this.logger.warn("telegram.result_sender.failure", { jobId: job.id, action: job.action, code: job.errorCode });
-    await this.options.api.sendMessage(job.chatId, jobFailedText(job.errorCode));
+    try {
+      await this.options.api.sendMessage(job.chatId, jobFailedText(job.errorCode));
+    } catch (error) {
+      this.logger.warn("telegram.result_sender.failure_notification_failed", {
+        jobId: job.id,
+        action: job.action,
+        statusCode: telegramErrorStatusCode(error),
+        reason: telegramErrorReasonCode(error),
+        error: sanitizeTelegramError(error),
+      });
+      throw new Error("Telegram failure notification failed");
+    }
   }
 
   private async getFileSizeBytes(job: MediaJob, filePath: string): Promise<number> {
@@ -203,6 +220,7 @@ export class TelegramResultSender {
         jobId: job.id,
         action: job.action,
         extension: path.extname(filePath).toLowerCase(),
+        reason: telegramErrorReasonCode(error),
         error: sanitizeTelegramError(error),
       });
       if (job.chatId) {
@@ -222,14 +240,17 @@ export class TelegramResultSender {
       await this.options.api.sendMessage(chatId, text);
     } catch (notificationError) {
       this.logger.warn("telegram.result_sender.notification_failed", {
+        statusCode: telegramErrorStatusCode(notificationError),
+        reason: telegramErrorReasonCode(notificationError),
+        originalReason: cause ? telegramErrorReasonCode(cause) : undefined,
         error: sanitizeTelegramError(notificationError),
       });
-      if (cause instanceof Error) throw cause;
-      if (notificationError instanceof Error) throw notificationError;
-      throw new Error(message);
+      throw new Error(`${message}; Telegram failure notification failed`);
     }
 
-    throw new TelegramResultAlreadyNotifiedError(message, { cause });
+    throw new TelegramResultAlreadyNotifiedError(message, {
+      reason: cause ? telegramErrorReasonCode(cause) : undefined,
+    });
   }
 }
 
@@ -269,6 +290,37 @@ function telegramErrorText(error: unknown): string {
   return String(error);
 }
 
+function telegramErrorCode(error: unknown): string | undefined {
+  const record = error as {
+    code?: unknown;
+    errno?: unknown;
+    response?: { code?: unknown; errno?: unknown };
+  };
+  const candidates = [record.code, record.errno, record.response?.code, record.response?.errno];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = candidate.toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+    if (normalized) return normalized.slice(0, 80);
+  }
+  return undefined;
+}
+
+function telegramErrorReasonCode(error: unknown): string {
+  const explicitCode = telegramErrorCode(error);
+  if (explicitCode) return explicitCode;
+
+  const statusCode = telegramErrorStatusCode(error);
+  if (statusCode) return `http_${statusCode}`;
+
+  const lowerText = telegramErrorText(error).toLowerCase();
+  if (lowerText.includes("enoent")) return "enoent";
+  if (lowerText.includes("eacces")) return "eacces";
+  if (lowerText.includes("request entity too large")) return "request_entity_too_large";
+  if (lowerText.includes("file is too big") || lowerText.includes("file too big")) return "file_too_big";
+  if (error instanceof Error) return "error";
+  return typeof error;
+}
+
 function classifyTelegramUploadTooLarge(error: unknown): TelegramUploadFailureReason | undefined {
   if (telegramErrorStatusCode(error) === 413) return "http_413";
 
@@ -279,9 +331,17 @@ function classifyTelegramUploadTooLarge(error: unknown): TelegramUploadFailureRe
 }
 
 function sanitizeTelegramError(error: unknown): string {
-  return telegramErrorText(error)
-    .replace(/https?:\/\/\S+/g, "[url]")
-    .replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot[redacted]")
-    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+  return redactSensitiveTelegramErrorText(telegramErrorText(error))
     .slice(0, 300);
+}
+
+function redactSensitiveTelegramErrorText(text: string): string {
+  return text
+    .replace(/file:\/\/\S+/gi, "file://[path]")
+    .replace(/https?:\/\/\S+/g, "[url]")
+    .replace(/(["'`])(?:[A-Za-z]:[\\/]|\/)[^"'`\r\n]*\1/g, "$1[path]$1")
+    .replace(/\b[A-Za-z]:[\\/][^\s"'`<>]+/g, "[path]")
+    .replace(/(^|[\s(=:,])\/(?:[^/\s"'`<>]+\/)+[^/\s"'`<>]*/g, "$1[path]")
+    .replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot[redacted]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]");
 }
