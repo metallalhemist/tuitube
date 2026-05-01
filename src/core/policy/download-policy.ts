@@ -1,6 +1,6 @@
 import { TuitubeError } from "../errors.js";
-import { getEstimatedFormatSize, getFormatValue } from "../format-selection.js";
-import type { Format, PolicyReason, PolicyState, SerializableFormatOption, Video } from "../types.js";
+import { buildDownloadPlans, getEstimatedFormatSize, getFormatValue } from "../format-selection.js";
+import type { DownloadPlan, Format, PolicyReason, PolicyState, SerializableFormatOption, Video } from "../types.js";
 
 export type UnknownSizePolicy = "reject" | "allow";
 
@@ -54,18 +54,28 @@ export function computeExpectedFormatSize(format: Format, video?: Video): number
   return baseSize;
 }
 
-export function evaluateDownloadPolicy({
-  format,
-  video,
-  policy = defaultDownloadPolicy,
+export function computeExpectedDownloadPlanSize(plan: DownloadPlan): number | undefined {
+  if (plan.estimatedSizeBytes !== undefined) return plan.estimatedSizeBytes;
+  if (plan.sourceFormats.length === 0) return undefined;
+
+  let total = 0;
+  for (const format of plan.sourceFormats) {
+    const size = getEstimatedFormatSize(format);
+    if (size === undefined) return undefined;
+    total += size;
+  }
+  return total;
+}
+
+function evaluateExpectedSizePolicy({
+  expectedSizeBytes,
+  policy,
   freeDiskBytes,
 }: {
-  format: Format;
-  video?: Video;
-  policy?: DownloadPolicyConfig;
+  expectedSizeBytes: number | undefined;
+  policy: DownloadPolicyConfig;
   freeDiskBytes?: number;
 }): PolicyState {
-  const expectedSizeBytes = computeExpectedFormatSize(format, video);
   const maxSizeBytes = mbToBytes(policy.maxFileSizeMb);
   const minFreeDiskBytes = mbToBytes(policy.minFreeDiskMb);
   const shouldCheckFreeDisk = policy.checkFreeDisk !== false;
@@ -115,15 +125,52 @@ export function evaluateDownloadPolicy({
   };
 }
 
+export function evaluateDownloadPolicy({
+  format,
+  video,
+  policy = defaultDownloadPolicy,
+  freeDiskBytes,
+}: {
+  format: Format;
+  video?: Video;
+  policy?: DownloadPolicyConfig;
+  freeDiskBytes?: number;
+}): PolicyState {
+  const expectedSizeBytes = computeExpectedFormatSize(format, video);
+  return evaluateExpectedSizePolicy({ expectedSizeBytes, policy, freeDiskBytes });
+}
+
+export function evaluateDownloadPlanPolicy({
+  plan,
+  policy = defaultDownloadPolicy,
+  freeDiskBytes,
+}: {
+  plan: DownloadPlan;
+  policy?: DownloadPolicyConfig;
+  freeDiskBytes?: number;
+}): PolicyState {
+  return evaluateExpectedSizePolicy({
+    expectedSizeBytes: computeExpectedDownloadPlanSize(plan),
+    policy,
+    freeDiskBytes,
+  });
+}
+
 export function attachPolicyState(
   options: SerializableFormatOption[],
   video: Video,
   policy: DownloadPolicyConfig = defaultDownloadPolicy,
   freeDiskBytes?: number,
 ): SerializableFormatOption[] {
+  const plans = buildDownloadPlans(video);
   return options.map((option) => {
+    const plan = plans.find((candidate) => candidate.formatValue === option.value);
     const format = video.formats.find((candidate) => getFormatValue(candidate) === option.value);
-    const policyState = format ? evaluateDownloadPolicy({ format, video, policy, freeDiskBytes }) : option.policy;
+    const policyState = plan
+      ? evaluateDownloadPlanPolicy({ plan, policy, freeDiskBytes })
+      : format
+        ? evaluateDownloadPolicy({ format, video, policy, freeDiskBytes })
+        : option.policy;
 
     return {
       ...option,

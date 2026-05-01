@@ -8,7 +8,7 @@ export type TelegramMenuSessionKey = {
   messageId: number;
 };
 
-export type TelegramMenuState = "root" | "quality" | "closed";
+export type TelegramMenuState = "root" | "container" | "quality" | "closed";
 
 export type TelegramMenuSession = TelegramMenuSessionKey & {
   url: string;
@@ -18,6 +18,7 @@ export type TelegramMenuSession = TelegramMenuSessionKey & {
   createdAt: number;
   expiresAt: number;
   state: TelegramMenuState;
+  selectedContainer?: string;
   activeJobId?: string;
 };
 
@@ -119,7 +120,7 @@ export class TelegramMenuSessionStore {
 
   update(
     key: TelegramMenuSessionKey,
-    patch: Partial<Pick<TelegramMenuSession, "state" | "activeJobId">>,
+    patch: Partial<Pick<TelegramMenuSession, "state" | "selectedContainer" | "activeJobId">>,
     now = this.now(),
   ): TelegramMenuSessionLookup {
     const lookup = this.get(key, now);
@@ -134,6 +135,7 @@ export class TelegramMenuSessionStore {
       chatId: key.chatId,
       messageId: key.messageId,
       state: updated.state,
+      selectedContainer: updated.selectedContainer,
       hasActiveJob: Boolean(updated.activeJobId),
     });
     return { status: "found", session: updated };
@@ -168,4 +170,3 @@ export class TelegramMenuSessionStore {
     return this.sessions.size;
   }
 }
-

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SerializableFormatOption } from "../../core/types.js";
-import { formatOptionButtonLabel, jobFailedText, telegramCopy, transcriptDeliveryMode } from "./copy.js";
+import { formatOptionButtonLabel, formatTelegramBytes, jobFailedText, telegramCopy, transcriptDeliveryMode } from "./copy.js";
 import {
   evaluateTelegramDisplayPolicy,
   TELEGRAM_DISPLAY_TOO_LARGE_BYTES,
@@ -52,9 +52,18 @@ describe("telegram copy and display policy", () => {
     );
   });
 
+  it("treats zero and invalid byte sizes as unknown", () => {
+    expect(formatTelegramBytes(0)).toBe("неизвестный размер");
+    expect(formatTelegramBytes(-1)).toBe("неизвестный размер");
+    expect(formatTelegramBytes(Number.NaN)).toBe("неизвестный размер");
+    expect(formatOptionButtonLabel(option({ estimatedSizeBytes: 0 }))).toBe("360p · неизвестный размер");
+    expect(formatOptionButtonLabel(option({ disabled: true, disabledReason: "unknown_size" }))).toBe(
+      "360p · 100 Б",
+    );
+  });
+
   it("chooses transcript document fallback for long transcripts", () => {
     expect(transcriptDeliveryMode("короткий текст")).toBe("message");
     expect(transcriptDeliveryMode("а".repeat(4_000))).toBe("document");
   });
 });
-

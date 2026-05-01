@@ -131,6 +131,16 @@ async function connectToUpstream(
   });
 }
 
+function absorbSocketError(socket: net.Socket, logger: Logger, side: "client" | "upstream"): void {
+  socket.on("error", (error) => {
+    logger.debug("egress_proxy.socket_error", {
+      side,
+      code: (error as NodeJS.ErrnoException).code,
+      message: error.message,
+    });
+  });
+}
+
 export async function createPrivateNetworkDeniedProxy({
   forceIpv4 = false,
   logger = noopLogger,
@@ -180,6 +190,7 @@ export async function createPrivateNetworkDeniedProxy({
 
   server.on("connection", (socket) => {
     sockets.add(socket);
+    absorbSocketError(socket, logger, "client");
     socket.once("close", () => sockets.delete(socket));
   });
 
@@ -187,6 +198,9 @@ export async function createPrivateNetworkDeniedProxy({
     try {
       const target = parseConnectTarget(request);
       const upstreamSocket = await connectToUpstream(target.hostname, target.port, resolveOptions);
+      absorbSocketError(upstreamSocket, logger, "upstream");
+      upstreamSocket.once("close", () => clientSocket.destroy());
+      clientSocket.once("close", () => upstreamSocket.destroy());
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length > 0) upstreamSocket.write(head);
       upstreamSocket.pipe(clientSocket);

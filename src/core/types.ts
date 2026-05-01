@@ -5,13 +5,31 @@ export type Format = {
   ext: string;
   video_ext: string;
   protocol: string;
-  filesize?: number;
-  filesize_approx?: number;
+  filesize?: number | null;
+  filesize_approx?: number | null;
   resolution: string;
   tbr: number | null;
   width?: number;
   height?: number;
   format_note?: string;
+};
+
+export type DownloadPlanKind = "single_file" | "merge" | "audio";
+
+export type DownloadPlan = {
+  id: string;
+  container: string;
+  containerLabel: string;
+  height?: number;
+  label: string;
+  estimatedSizeBytes?: number;
+  estimatedSizeLabel: string;
+  formatValue: string;
+  kind: DownloadPlanKind;
+  formatId: string;
+  resolution: string;
+  sourceFormats: Format[];
+  rank: number;
 };
 
 export type Video = {
@@ -74,6 +92,13 @@ export type SerializableFormatOption = {
   resolution: string;
   extension: string;
   formatId: string;
+  container?: string;
+  containerLabel?: string;
+  kind?: DownloadPlanKind;
+  height?: number;
+  label?: string;
+  estimatedSizeLabel?: string;
+  sourceFormatIds?: string[];
   estimatedSizeBytes?: number;
   disabled: boolean;
   disabledReason?: PolicyReason;

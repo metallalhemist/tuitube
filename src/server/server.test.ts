@@ -44,6 +44,17 @@ describe("server config and app", () => {
     ).toThrow("TELEGRAM_WEBHOOK_SECRET is required");
   });
 
+  it("allows polling mode without webhook secret", () => {
+    const config = loadServerConfig({
+      TELEGRAM_BOT_TOKEN: "123:token",
+      TELEGRAM_UPDATE_MODE: "polling",
+      PATH: "/bin",
+    });
+
+    expect(config.telegram.updateMode).toBe("polling");
+    expect(config.telegram.webhookSecret).toBeUndefined();
+  });
+
   it("keeps app factory injectable without startup side effects", async () => {
     const config = loadServerConfig({
       TELEGRAM_BOT_TOKEN: "123:token",

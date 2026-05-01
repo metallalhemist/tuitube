@@ -1,6 +1,7 @@
 import { noopLogger, type Logger } from "../../core/logger.js";
 import type { MediaJob } from "../../core/jobs/queue.js";
-import type { VideoSelectionSnapshot } from "../../core/types.js";
+import type { SerializableFormatOption, VideoSelectionSnapshot } from "../../core/types.js";
+import { isFirstScreenMp4Option } from "../../core/format-selection.js";
 import { telegramCopy } from "./copy.js";
 import type { TelegramMenuSessionStore } from "./menu-session-store.js";
 import type { DownloadMenus } from "./menus/download-menu.js";
@@ -14,6 +15,15 @@ export type TelegramMetadataApi = {
     options?: { reply_markup?: { inline_keyboard: import("grammy/types").InlineKeyboardButton[][] } },
   ): Promise<unknown>;
 };
+
+function formatContainerSummary(options: SerializableFormatOption[]): Record<string, number> {
+  const summary: Record<string, number> = {};
+  for (const option of options) {
+    const container = option.container ?? option.extension;
+    summary[container] = (summary[container] ?? 0) + 1;
+  }
+  return summary;
+}
 
 export class TelegramMetadataResultDispatcher {
   constructor(
@@ -37,9 +47,20 @@ export class TelegramMetadataResultDispatcher {
 
     this.logger.info("telegram.metadata_dispatch.start", { jobId: job.id, hasChatId: true });
     try {
+      const hasMp4WithoutRecoding = snapshot.formatOptions.some(
+        (option) => isFirstScreenMp4Option(option) && !option.disabled,
+      );
+      this.logger.info("telegram.metadata_dispatch.formats", {
+        jobId: job.id,
+        formatCount: snapshot.formatOptions.length,
+        containers: formatContainerSummary(snapshot.formatOptions),
+        mp4Count: snapshot.formatOptions.filter((option) => (option.container ?? option.extension) === "mp4").length,
+        firstScreenMp4Count: snapshot.formatOptions.filter(isFirstScreenMp4Option).length,
+      });
+      const messageText = telegramCopy.mainMenuTitle(snapshot.title, snapshot.duration, { hasMp4WithoutRecoding });
       const sentMessage = await this.options.api.sendMessage(
         job.chatId,
-        telegramCopy.mainMenuTitle(snapshot.title, snapshot.duration),
+        messageText,
       );
       this.options.store.create({
         chatId: job.chatId,
@@ -54,7 +75,7 @@ export class TelegramMetadataResultDispatcher {
       await this.options.api.editMessageText(
         job.chatId,
         sentMessage.message_id,
-        telegramCopy.mainMenuTitle(snapshot.title, snapshot.duration),
+        messageText,
         { reply_markup: replyMarkup },
       );
 

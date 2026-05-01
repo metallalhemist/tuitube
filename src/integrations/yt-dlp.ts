@@ -97,13 +97,20 @@ export async function fetchVideoMetadata({
   }
 }
 
-function downloadFormatArgs(formatValue: string): string[] {
+export function downloadFormatArgs(formatValue: string): string[] {
   if (formatValue === MP3_FORMAT_ID) {
     return ["--extract-audio", "--audio-format", "mp3", "--audio-quality", "0"];
   }
 
-  const [downloadFormat, recodeFormat] = formatValue.split("#");
-  return ["--format", downloadFormat, ...(recodeFormat ? ["--recode-video", recodeFormat] : [])];
+  const [downloadFormat, targetContainer] = formatValue.split("#");
+  const args = ["--format", downloadFormat];
+  const needsMerge = downloadFormat.includes("+");
+
+  if (needsMerge && targetContainer) {
+    args.push("--merge-output-format", targetContainer);
+  }
+
+  return args;
 }
 
 export async function downloadVideo({
@@ -124,10 +131,22 @@ export async function downloadVideo({
   logger.debug("ytdlp.download.start", { outputDirectory, formatValue });
   assertValidUrl(url);
   const result = await withPrivateNetworkDeniedProxy({ forceIpv4, logger }, async (proxyUrl) => {
+    const [downloadFormat, targetContainer] = formatValue.split("#");
+    const formatArgs = downloadFormatArgs(formatValue);
+    const needsMerge = downloadFormat.includes("+");
+    logger.debug("[FIX] ytdlp.download.format_args", {
+      formatValue,
+      downloadFormat,
+      targetContainer,
+      needsMerge,
+      mode: needsMerge ? "merge-output-format" : "download-as-is",
+      recodeVideo: false,
+    });
+
     const args = [
       ...commonArgs(forceIpv4, proxyUrl),
       ...(ffmpegPath ? ["--ffmpeg-location", ffmpegPath] : []),
-      ...downloadFormatArgs(formatValue),
+      ...formatArgs,
       "--print",
       "after_move:filepath",
       "--newline",

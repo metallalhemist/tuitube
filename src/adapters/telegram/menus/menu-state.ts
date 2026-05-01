@@ -10,6 +10,7 @@ import {
 } from "../menu-session-store.js";
 
 export const DOWNLOAD_ROOT_MENU_ID = "tuitube-download-root";
+export const DOWNLOAD_CONTAINER_MENU_ID = "tuitube-download-container";
 export const DOWNLOAD_QUALITY_MENU_ID = "tuitube-download-quality";
 
 export type MenuLookupResult =
@@ -31,6 +32,7 @@ export function menuFingerprint(session: TelegramMenuSession): string {
     session.messageId,
     session.expiresAt,
     session.state,
+    session.selectedContainer ?? "",
     session.formatOptions.length,
     session.activeJobId ?? "",
   ].join(":");

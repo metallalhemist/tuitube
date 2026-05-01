@@ -10,8 +10,12 @@ import {
 import { sanitizeVideoTitle as sanitizeVideoTitleCore } from "./core/sanitize.js";
 import type { DownloadOptions as CoreDownloadOptions } from "./core/types.js";
 import {
+  buildDownloadPlans,
+  buildMp4Plans,
   formatFilesize,
   formatTbr,
+  getFormatContainers,
+  getFormatOptionsForContainer,
   getFormats,
   getFormatTitle,
   getFormatValue,
@@ -147,4 +151,15 @@ export function sanitizeVideoTitle(name: string): string {
   return sanitizeVideoTitleCore(name, isWindows ? "win32" : process.platform);
 }
 
-export { formatFilesize, formatTbr, getFormats, getFormatTitle, getFormatValue, MP3_FORMAT_ID };
+export {
+  buildDownloadPlans,
+  buildMp4Plans,
+  formatFilesize,
+  formatTbr,
+  getFormatContainers,
+  getFormatOptionsForContainer,
+  getFormats,
+  getFormatTitle,
+  getFormatValue,
+  MP3_FORMAT_ID,
+};

@@ -13,7 +13,7 @@ export function formatTelegramDuration(seconds: number): string {
 }
 
 export function formatTelegramBytes(bytes: number | undefined): string {
-  if (bytes === undefined) return "размер неизвестен";
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return "неизвестный размер";
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} КиБ`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} МиБ`;
@@ -26,8 +26,13 @@ export const telegramCopy = {
   invalidUrl: "Не похоже на поддерживаемую ссылку. Пришлите полный URL, начинающийся с http:// или https://.",
   analyzingUrl: "Проверяю ссылку и готовлю варианты...",
   metadataFailed: "Не удалось подготовить варианты для этой ссылки. Попробуйте другую ссылку позже.",
-  mainMenuTitle: (title: string, duration: number) =>
-    `Видео: ${title}\nДлительность: ${formatTelegramDuration(duration)}\nВыберите действие:`,
+  mainMenuTitle: (title: string, duration: number, options: { hasMp4WithoutRecoding?: boolean } = {}) => {
+    const mp4Line =
+      options.hasMp4WithoutRecoding === false
+        ? "\nMP4 без перекодирования не найден. Выберите другой доступный формат."
+        : "";
+    return `Видео: ${title}\nДлительность: ${formatTelegramDuration(duration)}${mp4Line}\nВыберите действие:`;
+  },
   expiredSession: "Меню устарело. Пришлите ссылку еще раз.",
   missingSession: "Не нашел данные для этого меню. Пришлите ссылку еще раз.",
   outdatedMenu: "Меню устарело, обновляю варианты.",
@@ -50,6 +55,7 @@ export const telegramCopy = {
 export const telegramButtons = {
   bestVideo: "Скачать лучшее видео",
   chooseQuality: "Выбрать качество",
+  otherFormats: "Другие форматы",
   mp3: "Извлечь MP3",
   transcript: "Извлечь расшифровку",
   cancel: "Отмена",
@@ -61,7 +67,7 @@ export function policyReasonText(reason: TelegramDisplayPolicyReason | PolicyRea
     case "too_large":
       return "файл больше 2 ГиБ для Telegram";
     case "unknown_size":
-      return "размер заранее неизвестен";
+      return "неизвестный размер";
     case "server_limit":
       return "ограничение сервера по размеру файла";
     case "insufficient_disk":
@@ -78,9 +84,13 @@ export function formatOptionButtonLabel(
   displayPolicy?: TelegramDisplayPolicyState,
 ): string {
   const size = formatTelegramBytes(option.estimatedSizeBytes);
+  const quality = option.height ? `${option.height}p` : option.resolution;
   const reason = displayPolicy?.reason !== "allowed" ? displayPolicy?.reason : option.disabledReason;
-  const suffix = option.disabled || displayPolicy?.disabled ? ` - недоступно: ${policyReasonText(reason)}` : "";
-  return `${option.resolution} ${option.extension} (${size})${suffix}`;
+  const suffix =
+    reason && reason !== "unknown_size" && (option.disabled || displayPolicy?.disabled)
+      ? ` - недоступно: ${policyReasonText(reason)}`
+      : "";
+  return `${quality} · ${size}${suffix}`;
 }
 
 export function jobFailedText(code: string | undefined): string {
@@ -93,4 +103,3 @@ export function jobFailedText(code: string | undefined): string {
 export function transcriptDeliveryMode(transcript: string): "message" | "document" {
   return transcript.length <= TRANSCRIPT_MESSAGE_LIMIT ? "message" : "document";
 }
-

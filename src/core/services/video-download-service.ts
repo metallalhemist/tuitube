@@ -5,7 +5,7 @@ import { buildSerializableFormatOptions, chooseDownloadFormat } from "../format-
 import {
   assertPolicyAllowed,
   defaultDownloadPolicy,
-  evaluateDownloadPolicy,
+  evaluateDownloadPlanPolicy,
   type DownloadPolicyConfig,
 } from "../policy/download-policy.js";
 import { createTempJobDirectory } from "../jobs/temp-job.js";
@@ -81,8 +81,8 @@ export class VideoDownloadService {
     this.logger.debug("video_download.format_options.start");
     const video = await this.getMetadata(url, cancelSignal);
     const freeBytes = await this.getPolicyFreeDiskBytes();
-    const options = buildSerializableFormatOptions(video, (format) =>
-      evaluateDownloadPolicy({ format, video, policy: this.policy, freeDiskBytes: freeBytes }),
+    const options = buildSerializableFormatOptions(video, (plan) =>
+      evaluateDownloadPlanPolicy({ plan, policy: this.policy, freeDiskBytes: freeBytes }),
     );
     this.logger.debug("video_download.format_options.finish", { count: options.length });
     return options;
@@ -92,8 +92,8 @@ export class VideoDownloadService {
     this.logger.debug("video_download.selection_snapshot.start");
     const video = await this.getMetadata(url, cancelSignal);
     const freeBytes = await this.getPolicyFreeDiskBytes();
-    const formatOptions = buildSerializableFormatOptions(video, (format) =>
-      evaluateDownloadPolicy({ format, video, policy: this.policy, freeDiskBytes: freeBytes }),
+    const formatOptions = buildSerializableFormatOptions(video, (plan) =>
+      evaluateDownloadPlanPolicy({ plan, policy: this.policy, freeDiskBytes: freeBytes }),
     );
 
     this.logger.debug("video_download.selection_snapshot.finish", {
@@ -122,10 +122,9 @@ export class VideoDownloadService {
       const video = await this.getMetadata(url, cancelSignal);
       const freeBytes = await this.getPolicyFreeDiskBytes();
       const choice =
-        chooseDownloadFormat(video, formatValue, (format) => {
-          const state = evaluateDownloadPolicy({
-            format,
-            video,
+        chooseDownloadFormat(video, formatValue, (plan) => {
+          const state = evaluateDownloadPlanPolicy({
+            plan,
             policy: this.policy,
             freeDiskBytes: freeBytes,
           });
@@ -138,15 +137,16 @@ export class VideoDownloadService {
         });
       }
 
-      this.logger.debug("video_download.format_chosen", {
+      this.logger.debug("[FIX] video_download.plan_chosen", {
         formatId: choice.formatId,
         extension: choice.extension,
         reason: choice.reason,
+        formatValue: choice.value,
+        noRecodeVideo: true,
       });
 
-      const policyState = evaluateDownloadPolicy({
-        format: choice.format,
-        video,
+      const policyState = evaluateDownloadPlanPolicy({
+        plan: choice.plan,
         policy: this.policy,
         freeDiskBytes: freeBytes,
       });

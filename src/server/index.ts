@@ -23,6 +23,7 @@ async function main(): Promise<void> {
   logger.info("server.startup.config", {
     host: config.host,
     port: config.port,
+    updateMode: config.telegram.updateMode,
     webhookPath: config.telegram.webhookPath,
     localApiRootEnabled: Boolean(config.telegram.apiRoot),
   });
@@ -145,7 +146,16 @@ async function main(): Promise<void> {
   const server = createServerApp({ config, bot, jobService, worker, logger });
   installSignalHandlers({ server, logger });
 
-  if (config.telegram.webhookUrl) {
+  if (config.telegram.updateMode === "polling") {
+    logger.info("telegram.polling.start");
+    await bot.api.deleteWebhook({ drop_pending_updates: false });
+    bot.start({
+      allowed_updates: ["message", "callback_query"],
+      onStart: (botInfo) => {
+        logger.info("telegram.polling.started", { username: botInfo.username });
+      },
+    });
+  } else if (config.telegram.webhookUrl) {
     const finalWebhookUrl = buildWebhookUrl(config.telegram.webhookUrl, config.telegram.webhookPath);
     await registerTelegramWebhook({
       bot,

@@ -1,15 +1,15 @@
-import { Menu } from "@grammyjs/menu";
+import { Menu, MenuRange } from "@grammyjs/menu";
 import { normalizeError } from "../../../core/errors.js";
-import { MP3_FORMAT_ID } from "../../../core/format-selection.js";
+import { getFormatContainers, isFirstScreenMp4Option, MP3_FORMAT_ID } from "../../../core/format-selection.js";
 import { noopLogger, type Logger } from "../../../core/logger.js";
 import type { PolicyReason, SerializableFormatOption } from "../../../core/types.js";
-import { policyReasonText, telegramButtons, telegramCopy } from "../copy.js";
+import { formatOptionButtonLabel, policyReasonText, telegramButtons, telegramCopy } from "../copy.js";
 import type { TelegramMenuContext } from "../context.js";
 import type { TelegramMenuSession, TelegramMenuSessionStore } from "../menu-session-store.js";
 import { telegramDisplayPolicyForOption } from "../telegram-policy.js";
-import { createFormatMenu, type FormatMenuActionHandler } from "./format-menu.js";
+import { createContainerMenu, createFormatMenu, type FormatMenuActionHandler } from "./format-menu.js";
 import {
-  DOWNLOAD_QUALITY_MENU_ID,
+  DOWNLOAD_CONTAINER_MENU_ID,
   DOWNLOAD_ROOT_MENU_ID,
   createSyntheticMenuContext,
   getMenuSessionLookup,
@@ -37,13 +37,15 @@ export type RootActionAvailability = {
 
 export type DownloadMenus = {
   rootMenu: Menu<TelegramMenuContext>;
+  containerMenu: Menu<TelegramMenuContext>;
   qualityMenu: Menu<TelegramMenuContext>;
   renderRootMenuMarkup(chatId: string, messageId: number): Promise<{
     inline_keyboard: import("grammy/types").InlineKeyboardButton[][];
   }>;
 };
 
-function optionAvailable(option: SerializableFormatOption): boolean {
+function optionAvailable(option: SerializableFormatOption | undefined): boolean {
+  if (!option) return false;
   return !option.disabled && !telegramDisplayPolicyForOption(option).disabled;
 }
 
@@ -64,12 +66,10 @@ export function getRootActionAvailability(
 
   if (action === "extract_mp3") {
     const mp3Option = session.formatOptions.find((option) => option.value === MP3_FORMAT_ID);
-    return mp3Option && optionAvailable(mp3Option)
-      ? { disabled: false }
-      : { disabled: true, reason: optionUnavailableReason(mp3Option) };
+    return optionAvailable(mp3Option) ? { disabled: false } : { disabled: true, reason: optionUnavailableReason(mp3Option) };
   }
 
-  return session.formatOptions.some(optionAvailable)
+  return session.formatOptions.some((option) => isFirstScreenMp4Option(option) && optionAvailable(option))
     ? { disabled: false }
     : { disabled: true, reason: optionUnavailableReason(session.formatOptions[0]) };
 }
@@ -95,6 +95,7 @@ export function createDownloadMenus({
       return lookup.status === "found" ? menuFingerprint(lookup.session) : "missing";
     },
   });
+  const containerMenu = createContainerMenu({ store, logger });
   const qualityMenu = createFormatMenu({ store, onFormatSelected, logger });
 
   const rootActionLabel = (label: string, action: RootMenuAction) => (ctx: TelegramMenuContext): string => {
@@ -145,15 +146,78 @@ export function createDownloadMenus({
     });
   };
 
+  const runFormatSelection = (option: SerializableFormatOption) => async (ctx: TelegramMenuContext) => {
+    const lookup = getMenuSessionLookup(ctx, store);
+    if (lookup.status !== "found") {
+      await ctx.answerCallbackQuery(lookup.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession);
+      ctx.menu.close();
+      return;
+    }
+
+    const displayPolicy = telegramDisplayPolicyForOption(option);
+    logger.debug("telegram.menu.root.mp4_action", {
+      sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
+      formatId: option.formatId,
+      disabled: option.disabled || displayPolicy.disabled,
+      reason: option.disabledReason ?? displayPolicy.reason,
+    });
+
+    if (option.disabled || displayPolicy.disabled) {
+      await ctx.answerCallbackQuery(telegramCopy.callbackDisabled);
+      return;
+    }
+
+    let created: { jobId: string };
+    try {
+      created = await onFormatSelected({
+        ctx,
+        session: lookup.session,
+        formatValue: option.value,
+      });
+    } catch (error) {
+      const normalized = normalizeError(error);
+      logger.warn("telegram.menu.root.mp4_action_failed", { code: normalized.code, formatId: option.formatId });
+      await ctx.answerCallbackQuery(normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed);
+      return;
+    }
+
+    store.update(lookup.key, { activeJobId: created.jobId, state: "closed" });
+    ctx.menu.close();
+    await ctx.answerCallbackQuery(telegramCopy.callbackAccepted).catch((error: unknown) => {
+      logger.warn("telegram.menu.root.mp4_answer_failed", {
+        formatId: option.formatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+
   rootMenu
-    .text(rootActionLabel(telegramButtons.bestVideo, "download_best"), runRootAction("download_best"))
-    .row()
-    .submenu(telegramButtons.chooseQuality, DOWNLOAD_QUALITY_MENU_ID, async (ctx) => {
+    .dynamic((ctx) => {
+      const lookup = getMenuSessionLookup(ctx, store);
+      if (lookup.status !== "found") {
+        logger.warn("telegram.menu.root.render_missing", { status: lookup.status });
+        return new MenuRange<TelegramMenuContext>();
+      }
+
+      const dynamicRange = new MenuRange<TelegramMenuContext>();
+      for (const option of lookup.session.formatOptions.filter(isFirstScreenMp4Option)) {
+        dynamicRange.text(formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option)), runFormatSelection(option));
+        dynamicRange.row();
+      }
+      return dynamicRange;
+    })
+    .submenu(telegramButtons.otherFormats, DOWNLOAD_CONTAINER_MENU_ID, async (ctx) => {
       const lookup = getMenuSessionLookup(ctx, store);
       if (lookup.status === "found") {
-        store.update(lookup.key, { state: "quality" });
-        logger.debug("telegram.menu.root.open_quality", {
+        const containers = getFormatContainers(lookup.session.formatOptions, { includeMp4: true });
+        if (containers.length === 0) {
+          await ctx.answerCallbackQuery(telegramCopy.callbackDisabled);
+          return;
+        }
+        store.update(lookup.key, { state: "container", selectedContainer: undefined });
+        logger.debug("telegram.menu.root.open_containers", {
           sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
+          containerCount: containers.length,
         });
         await ctx.answerCallbackQuery(telegramCopy.callbackAccepted);
         return;
@@ -182,10 +246,12 @@ export function createDownloadMenus({
       await ctx.answerCallbackQuery(telegramCopy.cancelled);
     });
 
-  rootMenu.register(qualityMenu);
+  rootMenu.register(containerMenu);
+  rootMenu.register(qualityMenu, DOWNLOAD_CONTAINER_MENU_ID);
 
   return {
     rootMenu,
+    containerMenu,
     qualityMenu,
     async renderRootMenuMarkup(chatId, messageId) {
       const ctx = createSyntheticMenuContext(chatId, messageId);

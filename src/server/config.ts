@@ -5,6 +5,7 @@ import { defaultDownloadPolicy, type DownloadPolicyConfig } from "../core/policy
 
 export type TelegramConfig = {
   botToken: string;
+  updateMode: "webhook" | "polling";
   webhookSecret?: string;
   webhookUrl?: string;
   webhookPath: "/telegram/webhook";
@@ -98,8 +99,9 @@ export function loadServerConfig(env: Record<string, string | undefined> = proce
       severity: "warn",
     });
   }
+  const updateMode = env.TELEGRAM_UPDATE_MODE === "polling" ? "polling" : "webhook";
   const webhookSecret = validateWebhookSecret(optionalString(env.TELEGRAM_WEBHOOK_SECRET));
-  if (!webhookSecret) {
+  if (updateMode === "webhook" && !webhookSecret) {
     throw new TuitubeError({
       code: "INVALID_CONFIG",
       message: "TELEGRAM_WEBHOOK_SECRET is required for Telegram webhook handling",
@@ -147,6 +149,7 @@ export function loadServerConfig(env: Record<string, string | undefined> = proce
     },
     telegram: {
       botToken,
+      updateMode,
       webhookSecret,
       webhookUrl: optionalString(env.TELEGRAM_WEBHOOK_URL),
       webhookPath: "/telegram/webhook",

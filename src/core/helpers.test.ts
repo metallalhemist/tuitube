@@ -2,14 +2,22 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { getFormatValue, buildSerializableFormatOptions, chooseDownloadFormat } from "./format-selection.js";
-import { evaluateDownloadPolicy } from "./policy/download-policy.js";
+import {
+  buildDownloadPlans,
+  buildSerializableFormatOptions,
+  chooseDownloadFormat,
+  chooseMergeContainer,
+  classifyFormat,
+  getFormatValue,
+  MP3_FORMAT_ID,
+} from "./format-selection.js";
+import { evaluateDownloadPlanPolicy, evaluateDownloadPolicy } from "./policy/download-policy.js";
 import { sanitizeVideoTitle } from "./sanitize.js";
 import { cleanUpSrt } from "./transcript/clean-srt.js";
 import { isValidUrl } from "./validation.js";
 import { createTempJobDirectory } from "./jobs/temp-job.js";
 import type { Format, Video } from "./types.js";
-import { fetchVideoMetadata, parsePrintedFilePath } from "../integrations/yt-dlp.js";
+import { downloadFormatArgs, fetchVideoMetadata, parsePrintedFilePath } from "../integrations/yt-dlp.js";
 import { resolvePublicAddress } from "../integrations/egress-proxy.js";
 import { mapProcessFailure, processFailureToError, redactCommandOutput, runBufferedCommand } from "../integrations/process.js";
 
@@ -113,21 +121,73 @@ describe("core helpers", () => {
 
   it("chooses deterministic formats and serializes policy state", () => {
     const choice = chooseDownloadFormat(video);
-    expect(choice?.formatId).toBe("137");
-    expect(getFormatValue(videoOnly)).toBe("137+bestaudio#mp4");
+    expect(choice?.formatId).toBe("137+140");
+    expect(choice?.value).toBe("137+140#mp4");
+    expect(getFormatValue(videoOnly)).toBe("137#mp4");
 
-    const options = buildSerializableFormatOptions(video, (format) =>
-      evaluateDownloadPolicy({
-        format,
-        video,
+    const options = buildSerializableFormatOptions(video, (plan) =>
+      evaluateDownloadPlanPolicy({
+        plan,
         policy: { maxFileSizeMb: 1, minFreeDiskMb: 1, unknownSizePolicy: "reject" },
         freeDiskBytes: 4 * 1024 * 1024,
       }),
     );
 
-    const option = options.find((candidate) => candidate.formatId === "137");
+    const option = options.find((candidate) => candidate.formatId === "137+140");
     expect(option?.estimatedSizeBytes).toBe(600);
     expect(option?.disabled).toBe(false);
+  });
+
+  it("classifies generic formats without treating missing acodec as video-only", () => {
+    expect(classifyFormat(combined)).toBe("muxed");
+    expect(classifyFormat(videoOnly)).toBe("video_only");
+    expect(classifyFormat(audio)).toBe("audio_only");
+    expect(
+      classifyFormat({
+        ...combined,
+        acodec: "",
+        format_id: "direct",
+        protocol: "https",
+      }),
+    ).toBe("probably_muxed_direct");
+    expect(
+      classifyFormat({
+        ...combined,
+        acodec: "",
+        format_id: "dash-video",
+        protocol: "https_dash_segments",
+      }),
+    ).toBe("adaptive_unknown");
+  });
+
+  it("selects only known safe merge containers", () => {
+    expect(chooseMergeContainer(videoOnly, audio)).toBe("mp4");
+    expect(
+      chooseMergeContainer(
+        { ...videoOnly, vcodec: "vp09.00.51.08", ext: "webm", video_ext: "webm" },
+        { ...audio, acodec: "opus", ext: "opus" },
+      ),
+    ).toBe("webm");
+    expect(chooseMergeContainer({ ...videoOnly, vcodec: "vp9" }, audio)).toBeUndefined();
+    expect(chooseMergeContainer(videoOnly, { ...audio, acodec: "opus", ext: "opus" })).toBeUndefined();
+  });
+
+  it("builds no-recode plans and hides raw DASH containers", () => {
+    const plans = buildDownloadPlans({
+      ...video,
+      formats: [
+        audio,
+        videoOnly,
+        { ...videoOnly, format_id: "dash-vp9", ext: "webm", video_ext: "webm", vcodec: "vp9", protocol: "dash" },
+        { ...audio, format_id: "dash-opus", ext: "opus", acodec: "opus", protocol: "dash" },
+        { ...combined, format_id: "flv-480", ext: "flv", video_ext: "flv", height: 480, resolution: "480p" },
+      ],
+    });
+
+    expect(plans.map((plan) => plan.formatValue)).toContain("137+140#mp4");
+    expect(plans.map((plan) => plan.formatValue)).toContain("dash-vp9+dash-opus#webm");
+    expect(plans.map((plan) => plan.container)).toContain("flv");
+    expect(plans.map((plan) => plan.container)).not.toContain("dash");
   });
 
   it("returns explicit policy reasons for unknown size and insufficient disk", () => {
@@ -185,6 +245,25 @@ Hello world
     const error = processFailureToError(failure);
     expect(error.code).toBe("PROCESS_TIMEOUT");
     expect((error as Error & { cause?: unknown }).cause).toBeUndefined();
+  });
+
+  it("generates yt-dlp format arguments without video recoding", () => {
+    expect(downloadFormatArgs("22#mp4")).toEqual(["--format", "22"]);
+    expect(downloadFormatArgs("137+140#mp4")).toEqual(["--format", "137+140", "--merge-output-format", "mp4"]);
+    expect(downloadFormatArgs("dash-vp9+dash-opus#webm")).toEqual([
+      "--format",
+      "dash-vp9+dash-opus",
+      "--merge-output-format",
+      "webm",
+    ]);
+    expect(downloadFormatArgs("137+140#mp4")).not.toContain("--recode-video");
+    expect(downloadFormatArgs(MP3_FORMAT_ID)).toEqual([
+      "--extract-audio",
+      "--audio-format",
+      "mp3",
+      "--audio-quality",
+      "0",
+    ]);
   });
 
   it("redacts URLs and token-like command output before storing failures", () => {

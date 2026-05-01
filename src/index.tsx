@@ -19,12 +19,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm, usePromise } from "@termcast/utils";
 import { execa } from "execa";
 import {
+  buildDownloadPlans,
+  buildMp4Plans,
   DownloadOptions,
+  getFormatContainers,
   getffmpegPath,
   getffprobePath,
-  getFormats,
-  getFormatTitle,
-  getFormatValue,
   getytdlPath,
   isMac,
   isValidHHMM,
@@ -34,6 +34,7 @@ import {
   sanitizeVideoTitle,
 } from "./utils.js";
 import { Video } from "./types.js";
+import { downloadFormatArgs } from "./integrations/yt-dlp.js";
 import Installer from "./views/installer.js";
 import Updater from "./views/updater.js";
 
@@ -60,18 +61,9 @@ export default function DownloadVideo() {
     onSubmit: async (values) => {
       if (!values.format) return;
       const options = ["-o", path.join(downloadPath, `${video?.title || "video"} (%(id)s).%(ext)s`)];
-      const [downloadFormat, recodeFormat] = values.format.split("#");
 
       options.push("--ffmpeg-location", ffmpegPath);
-
-      if (values.format === MP3_FORMAT_ID) {
-        options.push("--extract-audio");
-        options.push("--audio-format", "mp3");
-        options.push("--audio-quality", "0");
-      } else {
-        options.push("--format", downloadFormat);
-        options.push("--recode-video", recodeFormat);
-      }
+      options.push(...downloadFormatArgs(values.format));
 
       const toast = await showToast({
         title: "Downloading Video",
@@ -274,7 +266,21 @@ export default function DownloadVideo() {
     return null;
   }, [error]);
 
-  const formats = useMemo(() => getFormats(video), [video]);
+  const downloadPlans = useMemo(() => buildDownloadPlans(video), [video]);
+  const mp4Plans = useMemo(() => buildMp4Plans(video), [video]);
+  const otherContainers = useMemo(
+    () =>
+      getFormatContainers(
+        downloadPlans.map((plan) => ({
+          value: plan.formatValue,
+          container: plan.container,
+          containerLabel: plan.containerLabel,
+          extension: plan.container,
+          kind: plan.kind,
+        })),
+      ),
+    [downloadPlans],
+  );
 
   if (missingExecutable) {
     return <Installer executable={missingExecutable} onRefresh={() => setError(error + 1)} />;
@@ -315,19 +321,30 @@ export default function DownloadVideo() {
         placeholder="https://www.youtube.com/watch?v=ykaj0pS4A1A"
       />
       {warning && <Form.Description text={warning} />}
+      {video && mp4Plans.length === 0 && (
+        <Form.Description title="MP4" text="MP4 without recoding was not found. Choose another available format." />
+      )}
       {video && (
         <Form.Dropdown {...itemProps.format} title="Format">
-          {Object.entries(formats).map(([category, formats]) => (
-            <Form.Dropdown.Section title={category} key={category}>
-              {formats.map((format) => (
-                <Form.Dropdown.Item
-                  key={format.format_id}
-                  value={getFormatValue(format)}
-                  title={getFormatTitle(format)}
-                />
+          {mp4Plans.length > 0 && (
+            <Form.Dropdown.Section title="MP4" key="mp4">
+              {mp4Plans.map((plan) => (
+                <Form.Dropdown.Item key={plan.id} value={plan.formatValue} title={plan.label} />
               ))}
             </Form.Dropdown.Section>
+          )}
+          {otherContainers.map((container) => (
+            <Form.Dropdown.Section title={`Other formats - ${container.label}`} key={container.container}>
+              {downloadPlans
+                .filter((plan) => plan.container === container.container)
+                .map((plan) => (
+                  <Form.Dropdown.Item key={plan.id} value={plan.formatValue} title={plan.label} />
+                ))}
+            </Form.Dropdown.Section>
           ))}
+          <Form.Dropdown.Section title="Audio" key="mp3">
+            <Form.Dropdown.Item key={MP3_FORMAT_ID} value={MP3_FORMAT_ID} title="MP3 Audio - best" />
+          </Form.Dropdown.Section>
         </Form.Dropdown>
       )}
     </Form>
