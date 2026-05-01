@@ -48,6 +48,10 @@ export const telegramCopy = {
   downloadStarted: "Скачивание запущено.",
   transcriptStarted: "Извлечение расшифровки запущено.",
   sendingFileFailed: "Файл подготовлен, но отправить его в Telegram не удалось.",
+  telegramUploadTooLarge: (limitLabel: string, mode: "cloud" | "local") =>
+    mode === "local"
+      ? `Файл слишком большой для Local Bot API: лимит ${limitLabel}. Выберите качество меньше.`
+      : `Файл слишком большой для облачного Bot API Telegram: лимит ${limitLabel}. Выберите качество меньше или настройте Local Bot API для больших MP4.`,
   transcriptDocumentCaption: "Расшифровка во вложении.",
   transcriptMessageLimit: TRANSCRIPT_MESSAGE_LIMIT,
 };

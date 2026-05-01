@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { InMemoryJobQueue } from "../core/jobs/in-memory-queue.js";
 import { JobService } from "../core/jobs/job-service.js";
 import type { DownloadJob } from "../core/jobs/queue.js";
+import {
+  TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES,
+  TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES,
+} from "../adapters/telegram/upload-limits.js";
 import { buildWebhookUrl, loadServerConfig, validateWebhookSecret } from "./config.js";
 import { createServerApp } from "./app.js";
 import { TELEGRAM_ALLOWED_UPDATES, registerTelegramWebhook } from "./webhook-registration.js";
@@ -53,6 +57,43 @@ describe("server config and app", () => {
 
     expect(config.telegram.updateMode).toBe("polling");
     expect(config.telegram.webhookSecret).toBeUndefined();
+  });
+
+  it("normalizes Telegram API roots and derives upload mode", () => {
+    const cloudConfig = loadServerConfig({
+      TELEGRAM_BOT_TOKEN: "123:token",
+      TELEGRAM_WEBHOOK_SECRET: "secret_token",
+      TELEGRAM_API_ROOT: "https://api.telegram.org/",
+      PATH: "/bin",
+    });
+    expect(cloudConfig.telegram.apiRoot).toBe("https://api.telegram.org");
+    expect(cloudConfig.telegram.uploadPolicy).toMatchObject({
+      mode: "cloud",
+      isLocalBotApiMode: false,
+      limitBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES,
+    });
+
+    const localConfig = loadServerConfig({
+      TELEGRAM_BOT_TOKEN: "123:token",
+      TELEGRAM_WEBHOOK_SECRET: "secret_token",
+      TELEGRAM_API_ROOT: "http://127.0.0.1:18081///",
+      PATH: "/bin",
+    });
+    expect(localConfig.telegram.apiRoot).toBe("http://127.0.0.1:18081");
+    expect(localConfig.telegram.uploadPolicy).toMatchObject({
+      mode: "local",
+      isLocalBotApiMode: true,
+      limitBytes: TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES,
+    });
+
+    expect(() =>
+      loadServerConfig({
+        TELEGRAM_BOT_TOKEN: "123:token",
+        TELEGRAM_WEBHOOK_SECRET: "secret_token",
+        TELEGRAM_API_ROOT: "http://127.0.0.1:18081/bot123:secret",
+        PATH: "/bin",
+      }),
+    ).toThrow("/bot<TOKEN>");
   });
 
   it("keeps app factory injectable without startup side effects", async () => {
