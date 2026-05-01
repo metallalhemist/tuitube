@@ -74,28 +74,28 @@ Open questions:
 
 ### Phase 2: Pure Format Selectors And Menu State
 
-- [ ] Task 4: Add pure format selectors for the new Telegram menu model.
+- [x] Task 4: Add pure format selectors for the new Telegram menu model.
   - [ ] Deliverable: add deterministic selectors for root MP4 video options, video containers excluding audio, video qualities by container, and audio-only options.
   - [ ] Expected behavior: root MP4 selectors return only MP4 video options, not audio. Add or refactor explicit selector helpers for root MP4 options, video containers, video options by container, and audio-only options instead of relying on one generic container helper. Refactor existing helpers such as `getFormatContainers` and `getFormatOptionsForContainer` so callers cannot accidentally keep the current behavior that excludes only `MP3_FORMAT_ID` while allowing M4A/OPUS/WEBM audio to leak into video menus. Other-format containers show video containers such as WEBM, exclude all audio-only options by checking `SerializableFormatOption.kind === "audio"` rather than only excluding `MP3_FORMAT_ID`, and exclude MP4 when MP4 already appears on the root screen. If no MP4 is shown on root, MP4 remains available under Other Formats as fallback. WEBM video container labels must be `WEBM`, never `WEBM Audio`. Audio selectors include M4A, OPUS/WEBM audio, and the synthetic MP3/Best option supported by `MP3_FORMAT_ID`.
   - [ ] Files: `src/core/format-selection.ts`, `src/core/helpers.test.ts`.
   - [ ] Logging requirements: pure selectors must not log; callers log selected counts/reasons at the adapter boundary.
   - [ ] Dependencies: none.
 
-- [ ] Task 5: Update Telegram button labeling and row layout helpers.
+- [x] Task 5: Update Telegram button labeling and row layout helpers.
   - [ ] Deliverable: adjust label helpers so unknown sizes omit size text, known sizes render like `720p · 42.3 МиБ`, and rows use two buttons only for short labels.
   - [ ] Expected behavior: button text never contains `неизвестный размер`; unknown-size video buttons show only quality/container label. Long labels use one button per row. MP4 root buttons are rendered two per row when labels are short enough. Add a shared row-layout helper that receives rendered labels/options and returns stable rows; reuse it from root MP4, video-quality, and audio menus so long translated/disabled labels cannot overflow cramped two-button rows. Tests should assert row shape for short labels, long labels, and disabled labels, not only flattened button text. Container buttons use container labels such as `WEBM`; audio format buttons show audio format labels such as `M4A`, `OPUS`, `WEBM Audio`, and `MP3`.
   - [ ] Files: `src/adapters/telegram/copy.ts`, `src/adapters/telegram/menus/download-menu.ts`, `src/adapters/telegram/menus/format-menu.ts`, `src/adapters/telegram/menus/download-menu.test.ts`, `src/adapters/telegram/copy.test.ts`.
   - [ ] Logging requirements: no logging in pure copy helpers; menu render code logs button counts and one-vs-two-column layout decisions at `DEBUG`.
   - [ ] Dependencies: task 4.
 
-- [ ] Task 6: Redesign the root Telegram menu.
+- [x] Task 6: Redesign the root Telegram menu.
   - [ ] Deliverable: replace root action buttons with MP4 video options, `Другие форматы`, `Извлечь аудио`, and `Отмена`.
   - [ ] Expected behavior: root menu no longer contains `Извлечь MP3` or `Извлечь расшифровку`. Root MP4 options enqueue `download_format` with the selected `formatValue`. `Другие форматы` is always on a separate row and opens the video-container menu. `Извлечь аудио` is on a separate row and opens the audio menu. `Отмена` remains available. Disabled options answer callbacks without enqueueing work. Update `/start`, main menu title/help copy, and tests so Telegram no longer advertises transcript extraction in the menu flow.
   - [ ] Files: `src/adapters/telegram/menus/download-menu.ts`, `src/adapters/telegram/menus/menu-state.ts`, `src/adapters/telegram/copy.ts`, `src/server/index.ts`.
   - [ ] Logging requirements: log root render/action at `DEBUG` with session key, option id/action, disabled state, and reason code. Do not log raw URLs.
   - [ ] Dependencies: tasks 4 and 5.
 
-- [ ] Task 7: Redesign Other Formats and add Audio menu navigation.
+- [x] Task 7: Redesign Other Formats and add Audio menu navigation.
   - [ ] Deliverable: split existing container/quality menu into video-container quality selection and audio-only selection.
   - [ ] Expected behavior: Other Formats lists only video containers; it does not list audio containers/options. If MP4 is already on root, Other Formats excludes MP4; otherwise it may include MP4 fallback. Selecting a video container shows qualities for that container, two per row where labels are short, plus `Назад`. Add a stable `DOWNLOAD_AUDIO_MENU_ID`, expose `audioMenu` from `DownloadMenus`, register it under the root menu, and verify `rootMenu.at(DOWNLOAD_AUDIO_MENU_ID)` in tests. Audio menu lists only audio-only options including M4A, OPUS/WEBM audio, and MP3/Best where available; selecting any audio option enqueues `download_format` with that option's `formatValue`, including `MP3_FORMAT_ID` for MP3. Transcript extraction is not available from this menu flow.
   - [ ] Files: `src/adapters/telegram/menus/download-menu.ts`, `src/adapters/telegram/menus/format-menu.ts`, `src/adapters/telegram/menus/menu-state.ts`, `src/adapters/telegram/menu-session-store.ts`, `src/adapters/telegram/copy.ts`, `src/server/index.ts`.

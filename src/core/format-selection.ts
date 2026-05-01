@@ -411,18 +411,46 @@ export function buildMp4Plans(video?: Video): DownloadPlan[] {
   return buildDownloadPlans(video).filter(isFirstScreenMp4Plan);
 }
 
-export function getFormatContainers(
-  options: Pick<SerializableFormatOption, "container" | "containerLabel" | "extension" | "kind" | "value">[],
+type SerializableFormatOptionContainerView = Pick<
+  SerializableFormatOption,
+  "container" | "containerLabel" | "extension" | "kind" | "value"
+>;
+
+function optionContainer(
+  option: Pick<SerializableFormatOption, "container" | "extension">,
+): string | undefined {
+  return option.container ?? option.extension;
+}
+
+export function isAudioOnlyFormatOption(
+  option: Pick<SerializableFormatOption, "kind" | "value">,
+): boolean {
+  return option.kind === "audio" || option.value === MP3_FORMAT_ID;
+}
+
+export function isVideoFormatOption(
+  option: Pick<SerializableFormatOption, "container" | "extension" | "kind" | "value">,
+): boolean {
+  const container = optionContainer(option);
+  return Boolean(container && container !== "dash" && !isAudioOnlyFormatOption(option));
+}
+
+export function getRootMp4FormatOptions(options: SerializableFormatOption[]): SerializableFormatOption[] {
+  return options.filter(isFirstScreenMp4Option);
+}
+
+export function getVideoFormatContainers(
+  options: SerializableFormatOptionContainerView[],
   { includeMp4 = false }: { includeMp4?: boolean } = {},
 ): FormatContainerOption[] {
   const labels = new Map<string, string>();
 
   for (const option of options) {
-    if (option.value === MP3_FORMAT_ID) continue;
-    const container = option.container ?? option.extension;
-    if (!container || container === "dash") continue;
+    if (!isVideoFormatOption(option)) continue;
+    const container = optionContainer(option);
+    if (!container) continue;
     if (!includeMp4 && container === "mp4") continue;
-    labels.set(container, option.containerLabel ?? getContainerLabel(container, option.kind));
+    labels.set(container, getContainerLabel(container, "single_file"));
   }
 
   return [...labels.entries()]
@@ -430,12 +458,40 @@ export function getFormatContainers(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export function getFormatOptionsForContainer(
+export function getOtherVideoFormatContainers(
+  options: SerializableFormatOptionContainerView[],
+): FormatContainerOption[] {
+  const hasRootMp4 = options.some((option) => {
+    const container = optionContainer(option);
+    return container === "mp4" && !isAudioOnlyFormatOption(option);
+  });
+  return getVideoFormatContainers(options, { includeMp4: !hasRootMp4 });
+}
+
+export function getFormatContainers(
+  options: SerializableFormatOptionContainerView[],
+  { includeMp4 = false }: { includeMp4?: boolean } = {},
+): FormatContainerOption[] {
+  return getVideoFormatContainers(options, { includeMp4 });
+}
+
+export function getVideoFormatOptionsForContainer(
   options: SerializableFormatOption[],
   container: string | undefined,
 ): SerializableFormatOption[] {
   if (!container) return [];
-  return options.filter((option) => option.value !== MP3_FORMAT_ID && (option.container ?? option.extension) === container);
+  return options.filter((option) => isVideoFormatOption(option) && optionContainer(option) === container);
+}
+
+export function getFormatOptionsForContainer(
+  options: SerializableFormatOption[],
+  container: string | undefined,
+): SerializableFormatOption[] {
+  return getVideoFormatOptionsForContainer(options, container);
+}
+
+export function getAudioFormatOptions(options: SerializableFormatOption[]): SerializableFormatOption[] {
+  return options.filter(isAudioOnlyFormatOption);
 }
 
 function buildSerializableFormatOptionFromPlan(plan: DownloadPlan, policy?: PolicyState): SerializableFormatOption {

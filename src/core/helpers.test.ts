@@ -8,7 +8,12 @@ import {
   chooseDownloadFormat,
   chooseMergeContainer,
   classifyFormat,
+  getAudioFormatOptions,
   getFormatValue,
+  getOtherVideoFormatContainers,
+  getRootMp4FormatOptions,
+  getVideoFormatContainers,
+  getVideoFormatOptionsForContainer,
   MP3_FORMAT_ID,
 } from "./format-selection.js";
 import { evaluateDownloadPlanPolicy, evaluateDownloadPolicy } from "./policy/download-policy.js";
@@ -188,6 +193,52 @@ describe("core helpers", () => {
     expect(plans.map((plan) => plan.formatValue)).toContain("dash-vp9+dash-opus#webm");
     expect(plans.map((plan) => plan.container)).toContain("flv");
     expect(plans.map((plan) => plan.container)).not.toContain("dash");
+  });
+
+  it("selects Telegram menu format groups without leaking audio into video menus", () => {
+    const options = buildSerializableFormatOptions({
+      ...video,
+      formats: [
+        audio,
+        { ...audio, format_id: "251", ext: "opus", acodec: "opus", tbr: 160 },
+        combined,
+        videoOnly,
+        { ...videoOnly, format_id: "248", ext: "webm", video_ext: "webm", vcodec: "vp9", protocol: "dash" },
+        { ...audio, format_id: "251-webm", ext: "webm", acodec: "opus", protocol: "dash" },
+      ],
+    });
+
+    expect(getRootMp4FormatOptions(options).every((option) => option.container === "mp4" && option.kind !== "audio")).toBe(
+      true,
+    );
+    expect(getVideoFormatContainers(options, { includeMp4: true }).map((container) => container.label)).toContain("WEBM");
+    expect(getVideoFormatContainers(options, { includeMp4: true }).map((container) => container.label)).not.toContain(
+      "WEBM Audio",
+    );
+    expect(getVideoFormatOptionsForContainer(options, "webm").every((option) => option.kind !== "audio")).toBe(true);
+    expect(getAudioFormatOptions(options).map((option) => option.value)).toEqual(
+      expect.arrayContaining(["140#m4a", "251#opus", MP3_FORMAT_ID]),
+    );
+  });
+
+  it("keeps MP4 available under other formats only when root has no MP4 option", () => {
+    const options = buildSerializableFormatOptions({
+      ...video,
+      formats: [audio, combined, videoOnly],
+    });
+    const withoutMp4 = options.filter((option) => option.container !== "mp4");
+
+    expect(getOtherVideoFormatContainers(options).map((container) => container.container)).not.toContain("mp4");
+    expect(getOtherVideoFormatContainers(withoutMp4).map((container) => container.container)).not.toContain("mp4");
+
+    const webmOnly = buildSerializableFormatOptions({
+      ...video,
+      formats: [
+        { ...videoOnly, format_id: "248", ext: "webm", video_ext: "webm", vcodec: "vp9", protocol: "dash" },
+        { ...audio, format_id: "251-webm", ext: "webm", acodec: "opus", protocol: "dash" },
+      ],
+    });
+    expect(getOtherVideoFormatContainers(webmOnly).map((container) => container.container)).toEqual(["webm"]);
   });
 
   it("returns explicit policy reasons for unknown size and insufficient disk", () => {

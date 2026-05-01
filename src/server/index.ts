@@ -68,22 +68,6 @@ async function main(): Promise<void> {
   const menus = createDownloadMenus({
     store: menuSessionStore,
     logger,
-    onRootAction: async ({ ctx, session, action }) => {
-      await ctx.reply(action === "extract_transcript" ? telegramCopy.transcriptStarted : telegramCopy.downloadStarted);
-      const job = await jobService.createMediaJob({
-        action,
-        payload: { url: session.url },
-        chatId: session.chatId,
-      });
-      await ctx.reply(telegramCopy.queueAccepted(job.id)).catch((error: unknown) => {
-        logger.warn("telegram.menu.root.queue_accept_reply_failed", {
-          jobId: job.id,
-          action,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-      return { jobId: job.id };
-    },
     onFormatSelected: async ({ ctx, session, formatValue }) => {
       await ctx.reply(telegramCopy.downloadStarted);
       const job = await jobService.createMediaJob({

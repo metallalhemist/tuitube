@@ -8,7 +8,7 @@ export type TelegramMenuSessionKey = {
   messageId: number;
 };
 
-export type TelegramMenuState = "root" | "container" | "quality" | "closed";
+export type TelegramMenuState = "root" | "container" | "quality" | "audio" | "closed";
 
 export type TelegramMenuSession = TelegramMenuSessionKey & {
   url: string;

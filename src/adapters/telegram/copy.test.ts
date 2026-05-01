@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { SerializableFormatOption } from "../../core/types.js";
-import { formatOptionButtonLabel, formatTelegramBytes, jobFailedText, telegramCopy, transcriptDeliveryMode } from "./copy.js";
+import {
+  audioFormatButtonLabel,
+  formatOptionButtonLabel,
+  formatTelegramBytes,
+  jobFailedText,
+  telegramCopy,
+  transcriptDeliveryMode,
+} from "./copy.js";
 import {
   evaluateTelegramDisplayPolicy,
   TELEGRAM_DISPLAY_TOO_LARGE_BYTES,
@@ -56,9 +63,21 @@ describe("telegram copy and display policy", () => {
     expect(formatTelegramBytes(0)).toBe("неизвестный размер");
     expect(formatTelegramBytes(-1)).toBe("неизвестный размер");
     expect(formatTelegramBytes(Number.NaN)).toBe("неизвестный размер");
-    expect(formatOptionButtonLabel(option({ estimatedSizeBytes: 0 }))).toBe("360p · неизвестный размер");
+    expect(formatOptionButtonLabel(option({ estimatedSizeBytes: 0 }))).toBe("360p");
+    expect(formatOptionButtonLabel(option({ estimatedSizeBytes: undefined }))).toBe("360p");
     expect(formatOptionButtonLabel(option({ disabled: true, disabledReason: "unknown_size" }))).toBe(
       "360p · 100 Б",
+    );
+  });
+
+  it("renders known video sizes and audio format labels compactly", () => {
+    expect(formatOptionButtonLabel(option({ height: 720, resolution: "720p", estimatedSizeBytes: 42.3 * 1024 ** 2 }))).toBe(
+      "720p · 42.3 МиБ",
+    );
+    expect(audioFormatButtonLabel(option({ value: "140#m4a", extension: "m4a", container: "m4a" }))).toBe("M4A");
+    expect(audioFormatButtonLabel(option({ value: "251#opus", extension: "opus", container: "opus" }))).toBe("OPUS");
+    expect(audioFormatButtonLabel(option({ value: "251#webm", extension: "webm", container: "webm" }))).toBe(
+      "WEBM Audio",
     );
   });
 
