@@ -138,11 +138,15 @@ export function createDownloadMenus({
       }
       return dynamicRange;
     })
-    .submenu(telegramButtons.otherFormats, DOWNLOAD_CONTAINER_MENU_ID, async (ctx) => {
+    .text(telegramButtons.otherFormats, async (ctx) => {
       const lookup = getMenuSessionLookup(ctx, store);
       if (lookup.status === "found") {
         const containers = getOtherVideoFormatContainers(lookup.session.formatOptions);
         if (containers.length === 0) {
+          logger.debug("[FIX] telegram.menu.root.open_containers_disabled", {
+            sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
+            reason: "no_video_containers",
+          });
           await ctx.answerCallbackQuery(telegramCopy.callbackDisabled);
           return;
         }
@@ -151,6 +155,7 @@ export function createDownloadMenus({
           sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
           containerCount: containers.length,
         });
+        await ctx.menu.nav(DOWNLOAD_CONTAINER_MENU_ID);
         await ctx.answerCallbackQuery(telegramCopy.callbackAccepted);
         return;
       }

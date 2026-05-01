@@ -244,6 +244,26 @@ describe("TelegramResultSender", () => {
     });
   });
 
+  it("redacts unquoted local paths with spaces from upload failure logs", async () => {
+    await withDownloadFile("secret upload title.mp4", 1024, async (download) => {
+      const api = createApi({
+        sendVideo: vi.fn(async () => {
+          throw new Error(`[FIX] upload failed for ${download.filePath} before send`);
+        }),
+      });
+      const logger = testLogger();
+      const sender = new TelegramResultSender({ api, logger });
+
+      await expect(sender.sendDownload(job, download)).rejects.toBeInstanceOf(TelegramResultAlreadyNotifiedError);
+
+      const logs = loggerText(logger);
+      expect(logs).toContain("[FIX]");
+      expect(logs).toContain("[path]");
+      expect(logs).not.toContain(download.filePath);
+      expect(logs).not.toContain("secret upload title");
+    });
+  });
+
   it("throws a safe error when the failure notification cannot be sent", async () => {
     await withDownloadFile("notification-secret-title.mp4", 1024, async (download) => {
       const uploadError = new Error(`upload failed for '${download.filePath}'`);

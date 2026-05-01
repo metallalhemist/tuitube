@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { Bot } from "grammy";
+import type { UserFromGetMe } from "grammy/types";
 import { TelegramMenuSessionStore } from "../menu-session-store.js";
 import type { SerializableFormatOption } from "../../../core/types.js";
+import type { TelegramMenuContext } from "../context.js";
 import { MP3_FORMAT_ID } from "../../../core/format-selection.js";
 import { TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES } from "../upload-limits.js";
-import { createDownloadMenus } from "./download-menu.js";
+import { createDownloadMenus, type DownloadMenus } from "./download-menu.js";
 import {
   DOWNLOAD_AUDIO_MENU_ID,
   DOWNLOAD_CONTAINER_MENU_ID,
@@ -79,6 +82,60 @@ const opusOption: SerializableFormatOption = {
   containerLabel: "OPUS Audio",
   estimatedSizeBytes: 90,
 };
+
+const botInfo: UserFromGetMe = {
+  id: 123,
+  is_bot: true,
+  first_name: "Tuitube",
+  username: "tuitube_test_bot",
+  can_join_groups: true,
+  can_read_all_group_messages: false,
+  can_manage_bots: false,
+  supports_inline_queries: false,
+  can_connect_to_business: false,
+  has_main_web_app: false,
+  has_topics_enabled: false,
+  allows_users_to_create_topics: false,
+};
+
+async function invokeRootButton(
+  menus: DownloadMenus,
+  chatId: string,
+  messageId: number,
+  buttonText: string,
+): Promise<Array<{ method: string; payload: unknown }>> {
+  const markup = await menus.renderRootMenuMarkup(chatId, messageId);
+  const button = markup.inline_keyboard.flat().find((candidate) => candidate.text === buttonText) as
+    | { callback_data?: string }
+    | undefined;
+  if (!button?.callback_data) throw new Error(`Button not found or has no callback data: ${buttonText}`);
+
+  const bot = new Bot<TelegramMenuContext>("123:token", { botInfo });
+  const calls: Array<{ method: string; payload: unknown }> = [];
+  bot.api.config.use(async (_previous, method, payload) => {
+    calls.push({ method, payload });
+    return { ok: true, result: true } as never;
+  });
+  bot.use(menus.rootMenu);
+
+  await bot.handleUpdate({
+    update_id: 1,
+    callback_query: {
+      id: "callback-1",
+      from: { id: 1, is_bot: false, first_name: "User" },
+      chat_instance: "instance-1",
+      message: {
+        message_id: messageId,
+        date: 0,
+        chat: { id: Number(chatId), type: "private" },
+        text: "menu",
+      },
+      data: button.callback_data,
+    },
+  } as never);
+
+  return calls;
+}
 
 describe("download menu", () => {
   it("lays out short labels two per row and long labels one per row", () => {
@@ -222,6 +279,28 @@ describe("download menu", () => {
     expect(menus.rootMenu.at(DOWNLOAD_CONTAINER_MENU_ID)).toBe(menus.containerMenu);
     expect(menus.rootMenu.at(DOWNLOAD_QUALITY_MENU_ID)).toBe(menus.qualityMenu);
     expect(menus.rootMenu.at(DOWNLOAD_AUDIO_MENU_ID)).toBe(menus.audioMenu);
+  });
+
+  it("keeps Other Formats on the root menu when no alternate video containers exist", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 13,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption],
+    });
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel: vi.fn(async () => undefined),
+    });
+
+    const calls = await invokeRootButton(menus, "123", 13, "Другие форматы");
+
+    expect(calls.map((call) => call.method)).toEqual(["answerCallbackQuery"]);
+    expect(calls[0]?.payload).toMatchObject({ text: "Этот вариант недоступен." });
   });
 
   it("shows MP4 video options on the root menu even when height is unknown", async () => {

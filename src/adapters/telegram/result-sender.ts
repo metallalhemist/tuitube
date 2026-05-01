@@ -299,7 +299,10 @@ function telegramErrorCode(error: unknown): string | undefined {
   const candidates = [record.code, record.errno, record.response?.code, record.response?.errno];
   for (const candidate of candidates) {
     if (typeof candidate !== "string") continue;
-    const normalized = candidate.toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+    const normalized = candidate
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "");
     if (normalized) return normalized.slice(0, 80);
   }
   return undefined;
@@ -331,15 +334,19 @@ function classifyTelegramUploadTooLarge(error: unknown): TelegramUploadFailureRe
 }
 
 function sanitizeTelegramError(error: unknown): string {
-  return redactSensitiveTelegramErrorText(telegramErrorText(error))
-    .slice(0, 300);
+  return redactSensitiveTelegramErrorText(telegramErrorText(error)).slice(0, 300);
 }
 
 function redactSensitiveTelegramErrorText(text: string): string {
+  const pathExtension = String.raw`(?:mp4|mkv|mov|webm|flv|m4a|aac|mp3|opus|ogg|wav|flac|weba|txt|srt|vtt)`;
+  const unquotedPathText = "[^\\r\\n\"'`<>]*?";
   return text
+    .replace(new RegExp(String.raw`file://${unquotedPathText}\.${pathExtension}\b`, "gi"), "file://[path]")
     .replace(/file:\/\/\S+/gi, "file://[path]")
     .replace(/https?:\/\/\S+/g, "[url]")
     .replace(/(["'`])(?:[A-Za-z]:[\\/]|\/)[^"'`\r\n]*\1/g, "$1[path]$1")
+    .replace(new RegExp(String.raw`\b[A-Za-z]:[\\/]${unquotedPathText}\.${pathExtension}\b`, "gi"), "[path]")
+    .replace(new RegExp(String.raw`(^|[\s(=:,])/${unquotedPathText}\.${pathExtension}\b`, "gi"), "$1[path]")
     .replace(/\b[A-Za-z]:[\\/][^\s"'`<>]+/g, "[path]")
     .replace(/(^|[\s(=:,])\/(?:[^/\s"'`<>]+\/)+[^/\s"'`<>]*/g, "$1[path]")
     .replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot[redacted]")
