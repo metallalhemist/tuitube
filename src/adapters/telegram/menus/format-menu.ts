@@ -1,17 +1,24 @@
 import { Menu, MenuRange } from "@grammyjs/menu";
 import { normalizeError } from "../../../core/errors.js";
-import { getFormatContainers, getFormatOptionsForContainer } from "../../../core/format-selection.js";
+import {
+  getAudioFormatOptions,
+  getOtherVideoFormatContainers,
+  getVideoFormatOptionsForContainer,
+} from "../../../core/format-selection.js";
 import { noopLogger, type Logger } from "../../../core/logger.js";
 import { formatOptionButtonLabel, telegramButtons, telegramCopy } from "../copy.js";
 import { telegramDisplayPolicyForOption } from "../telegram-policy.js";
+import { createTelegramUploadPolicy, type TelegramUploadPolicy } from "../upload-limits.js";
 import type { TelegramMenuContext } from "../context.js";
 import type { TelegramMenuSession, TelegramMenuSessionStore } from "../menu-session-store.js";
 import {
+  DOWNLOAD_AUDIO_MENU_ID,
   DOWNLOAD_CONTAINER_MENU_ID,
   DOWNLOAD_QUALITY_MENU_ID,
   getMenuSessionLookup,
   menuFingerprint,
 } from "./menu-state.js";
+import { layoutMenuRows } from "./menu-layout.js";
 
 export type FormatMenuActionHandler = (input: {
   ctx: TelegramMenuContext;
@@ -46,7 +53,7 @@ export function createContainerMenu({
     }
 
     const dynamicRange = new MenuRange<TelegramMenuContext>();
-    const containers = getFormatContainers(lookup.session.formatOptions, { includeMp4: true });
+    const containers = getOtherVideoFormatContainers(lookup.session.formatOptions);
     for (const container of containers) {
       dynamicRange.text(container.label, async (callbackCtx) => {
         logger.debug("telegram.menu.container.action", {
@@ -81,10 +88,12 @@ export function createContainerMenu({
 export function createFormatMenu({
   store,
   onFormatSelected,
+  uploadPolicy = createTelegramUploadPolicy(undefined),
   logger = noopLogger,
 }: {
   store: TelegramMenuSessionStore;
   onFormatSelected: FormatMenuActionHandler;
+  uploadPolicy?: TelegramUploadPolicy;
   logger?: Logger;
 }): Menu<TelegramMenuContext> {
   const menu = new Menu<TelegramMenuContext>(DOWNLOAD_QUALITY_MENU_ID, {
@@ -114,45 +123,63 @@ export function createFormatMenu({
     });
 
     const dynamicRange = new MenuRange<TelegramMenuContext>();
-    const options = getFormatOptionsForContainer(lookup.session.formatOptions, lookup.session.selectedContainer);
-    for (const option of options) {
-      const displayPolicy = telegramDisplayPolicyForOption(option);
-      dynamicRange.text(formatOptionButtonLabel(option, displayPolicy), async (callbackCtx) => {
-        logger.debug("telegram.menu.format.action", {
-          sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
-          formatId: option.formatId,
-          disabled: option.disabled || displayPolicy.disabled,
-          reason: option.disabledReason ?? displayPolicy.reason,
-        });
+    const options = getVideoFormatOptionsForContainer(lookup.session.formatOptions, lookup.session.selectedContainer);
+    const buttonItems = options.map((option) => ({
+      label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option, uploadPolicy)),
+      option,
+    }));
+    const rows = layoutMenuRows(buttonItems);
+    logger.debug("telegram.menu.format.layout", {
+      sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
+      selectedContainer: lookup.session.selectedContainer,
+      optionCount: buttonItems.length,
+      rowCount: rows.length,
+      twoColumnRows: rows.filter((row) => row.length === 2).length,
+    });
 
-        if (option.disabled || displayPolicy.disabled) {
-          await callbackCtx.answerCallbackQuery(telegramCopy.callbackDisabled);
-          return;
-        }
-
-        let created: { jobId: string };
-        try {
-          created = await onFormatSelected({
-            ctx: callbackCtx,
-            session: lookup.session,
-            formatValue: option.value,
-          });
-        } catch (error) {
-          const normalized = normalizeError(error);
-          logger.warn("telegram.menu.format.action_failed", { code: normalized.code, formatId: option.formatId });
-          await callbackCtx.answerCallbackQuery(normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed);
-          return;
-        }
-
-        store.update(lookup.key, { activeJobId: created.jobId, state: "closed" });
-        callbackCtx.menu.close();
-        await callbackCtx.answerCallbackQuery(telegramCopy.callbackAccepted).catch((error: unknown) => {
-          logger.warn("telegram.menu.format.answer_failed", {
+    for (const row of rows) {
+      for (const item of row) {
+        const option = item.option;
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+        dynamicRange.text(item.label, async (callbackCtx) => {
+          logger.debug("telegram.menu.format.action", {
+            sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
             formatId: option.formatId,
-            error: error instanceof Error ? error.message : String(error),
+            disabled: option.disabled || displayPolicy.disabled,
+            reason: option.disabledReason ?? displayPolicy.reason,
+          });
+
+          if (option.disabled || displayPolicy.disabled) {
+            await callbackCtx.answerCallbackQuery(telegramCopy.callbackDisabled);
+            return;
+          }
+
+          let created: { jobId: string };
+          try {
+            created = await onFormatSelected({
+              ctx: callbackCtx,
+              session: lookup.session,
+              formatValue: option.value,
+            });
+          } catch (error) {
+            const normalized = normalizeError(error);
+            logger.warn("telegram.menu.format.action_failed", { code: normalized.code, formatId: option.formatId });
+            await callbackCtx.answerCallbackQuery(
+              normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed,
+            );
+            return;
+          }
+
+          store.update(lookup.key, { activeJobId: created.jobId, state: "closed" });
+          callbackCtx.menu.close();
+          await callbackCtx.answerCallbackQuery(telegramCopy.callbackAccepted).catch((error: unknown) => {
+            logger.warn("telegram.menu.format.answer_failed", {
+              formatId: option.formatId,
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
         });
-      });
+      }
       dynamicRange.row();
     }
     return dynamicRange;
@@ -161,6 +188,113 @@ export function createFormatMenu({
   menu.back(telegramButtons.back, async (ctx) => {
     const lookup = getMenuSessionLookup(ctx, store);
     if (lookup.status === "found") store.update(lookup.key, { state: "container", selectedContainer: undefined });
+    await ctx.answerCallbackQuery(
+      lookup.status === "found"
+        ? telegramCopy.callbackAccepted
+        : lookup.status === "expired"
+          ? telegramCopy.expiredSession
+          : telegramCopy.missingSession,
+    );
+  });
+
+  return menu;
+}
+
+export function createAudioMenu({
+  store,
+  onFormatSelected,
+  uploadPolicy = createTelegramUploadPolicy(undefined),
+  logger = noopLogger,
+}: {
+  store: TelegramMenuSessionStore;
+  onFormatSelected: FormatMenuActionHandler;
+  uploadPolicy?: TelegramUploadPolicy;
+  logger?: Logger;
+}): Menu<TelegramMenuContext> {
+  const menu = new Menu<TelegramMenuContext>(DOWNLOAD_AUDIO_MENU_ID, {
+    autoAnswer: false,
+    onMenuOutdated: telegramCopy.outdatedMenu,
+    fingerprint: (ctx) => {
+      const lookup = getMenuSessionLookup(ctx, store);
+      return lookup.status === "found" ? menuFingerprint(lookup.session) : "missing";
+    },
+  });
+
+  menu.dynamic((ctx, range) => {
+    const lookup = getMenuSessionLookup(ctx, store);
+    if (lookup.status !== "found") {
+      logger.warn("telegram.menu.audio.render_missing", { status: lookup.status });
+      return range.text(telegramCopy.expiredSession, async (callbackCtx) => {
+        await callbackCtx.answerCallbackQuery(telegramCopy.expiredSession);
+        callbackCtx.menu.close();
+      });
+    }
+
+    const buttonItems = getAudioFormatOptions(lookup.session.formatOptions).map((option) => ({
+      label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option, uploadPolicy)),
+      option,
+    }));
+    const rows = layoutMenuRows(buttonItems);
+    logger.debug("telegram.menu.audio.layout", {
+      sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
+      optionCount: buttonItems.length,
+      rowCount: rows.length,
+      twoColumnRows: rows.filter((row) => row.length === 2).length,
+    });
+
+    const dynamicRange = new MenuRange<TelegramMenuContext>();
+    for (const row of rows) {
+      for (const item of row) {
+        const option = item.option;
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+        dynamicRange.text(item.label, async (callbackCtx) => {
+          logger.debug("telegram.menu.audio.action", {
+            sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
+            formatId: option.formatId,
+            disabled: option.disabled || displayPolicy.disabled,
+            reason: option.disabledReason ?? displayPolicy.reason,
+          });
+
+          if (option.disabled || displayPolicy.disabled) {
+            await callbackCtx.answerCallbackQuery(telegramCopy.callbackDisabled);
+            return;
+          }
+
+          let created: { jobId: string };
+          try {
+            created = await onFormatSelected({
+              ctx: callbackCtx,
+              session: lookup.session,
+              formatValue: option.value,
+            });
+          } catch (error) {
+            const normalized = normalizeError(error);
+            logger.warn("telegram.menu.audio.action_failed", { code: normalized.code, formatId: option.formatId });
+            await callbackCtx.answerCallbackQuery(
+              normalized.code === "QUEUE_FULL" ? telegramCopy.queueFull : telegramCopy.failed,
+            );
+            return;
+          }
+
+          store.update(lookup.key, { activeJobId: created.jobId, state: "closed" });
+          callbackCtx.menu.close();
+          await callbackCtx.answerCallbackQuery(telegramCopy.callbackAccepted).catch((error: unknown) => {
+            logger.warn("telegram.menu.audio.answer_failed", {
+              formatId: option.formatId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+        });
+      }
+      dynamicRange.row();
+    }
+
+    return dynamicRange;
+  });
+
+  menu.back(telegramButtons.back, async (ctx) => {
+    const lookup = getMenuSessionLookup(ctx, store);
+    if (lookup.status === "found") store.update(lookup.key, { state: "root", selectedContainer: undefined });
     await ctx.answerCallbackQuery(
       lookup.status === "found"
         ? telegramCopy.callbackAccepted

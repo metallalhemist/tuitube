@@ -83,7 +83,11 @@ export class DownloadWorker {
     const controller = new AbortController();
     this.activeControllers.set(job.id, controller);
     this.jobService.updateJob(job.id, "running", { startedAt: new Date() });
-    this.logger.info("download_worker.job.start", { jobId: job.id, action: job.action, hasChatId: Boolean(job.chatId) });
+    this.logger.info("download_worker.job.start", {
+      jobId: job.id,
+      action: job.action,
+      hasChatId: Boolean(job.chatId),
+    });
 
     let result: DownloadResult | undefined;
     try {
@@ -101,6 +105,9 @@ export class DownloadWorker {
         case "download_best":
         case "download_format":
         case "extract_mp3": {
+          if (job.action === "extract_mp3") {
+            this.logger.warn("download_worker.compatibility_action", { jobId: job.id, action: job.action });
+          }
           this.logger.info("download_worker.dispatch", { jobId: job.id, action: job.action });
           result = await this.downloadService.download({
             url: job.payload.url,
@@ -123,6 +130,7 @@ export class DownloadWorker {
           break;
         }
         case "extract_transcript": {
+          this.logger.warn("download_worker.compatibility_action", { jobId: job.id, action: job.action });
           this.logger.info("download_worker.dispatch", { jobId: job.id, action: job.action });
           if (!this.transcriptService) {
             throw new Error("Transcript service is not configured");

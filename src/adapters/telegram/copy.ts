@@ -1,3 +1,4 @@
+import { MP3_FORMAT_ID } from "../../core/format-selection.js";
 import type { PolicyReason, SerializableFormatOption } from "../../core/types.js";
 import type { TelegramDisplayPolicyReason, TelegramDisplayPolicyState } from "./telegram-policy.js";
 
@@ -20,18 +21,22 @@ export function formatTelegramBytes(bytes: number | undefined): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} ГиБ`;
 }
 
+function formatTelegramBytesIfKnown(bytes: number | undefined): string | undefined {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return undefined;
+  return formatTelegramBytes(bytes);
+}
+
 export const telegramCopy = {
-  start:
-    "Привет. Пришлите ссылку на видео, и я покажу меню для скачивания, MP3 или извлечения расшифровки.",
+  start: "Привет. Пришлите ссылку на видео, и я покажу MP4, другие форматы и аудио для скачивания.",
   invalidUrl: "Не похоже на поддерживаемую ссылку. Пришлите полный URL, начинающийся с http:// или https://.",
   analyzingUrl: "Проверяю ссылку и готовлю варианты...",
   metadataFailed: "Не удалось подготовить варианты для этой ссылки. Попробуйте другую ссылку позже.",
   mainMenuTitle: (title: string, duration: number, options: { hasMp4WithoutRecoding?: boolean } = {}) => {
     const mp4Line =
       options.hasMp4WithoutRecoding === false
-        ? "\nMP4 без перекодирования не найден. Выберите другой доступный формат."
+        ? "\nMP4 для отправки сейчас недоступен. Выберите другой доступный формат."
         : "";
-    return `Видео: ${title}\nДлительность: ${formatTelegramDuration(duration)}${mp4Line}\nВыберите действие:`;
+    return `Видео: ${title}\nДлительность: ${formatTelegramDuration(duration)}${mp4Line}\nВыберите формат:`;
   },
   expiredSession: "Меню устарело. Пришлите ссылку еще раз.",
   missingSession: "Не нашел данные для этого меню. Пришлите ссылку еще раз.",
@@ -48,6 +53,10 @@ export const telegramCopy = {
   downloadStarted: "Скачивание запущено.",
   transcriptStarted: "Извлечение расшифровки запущено.",
   sendingFileFailed: "Файл подготовлен, но отправить его в Telegram не удалось.",
+  telegramUploadTooLarge: (limitLabel: string, mode: "cloud" | "local") =>
+    mode === "local"
+      ? `Файл слишком большой для Local Bot API: лимит ${limitLabel}. Выберите качество меньше.`
+      : `Файл слишком большой для облачного Bot API Telegram: лимит ${limitLabel}. Выберите качество меньше или настройте Local Bot API для больших MP4.`,
   transcriptDocumentCaption: "Расшифровка во вложении.",
   transcriptMessageLimit: TRANSCRIPT_MESSAGE_LIMIT,
 };
@@ -56,8 +65,7 @@ export const telegramButtons = {
   bestVideo: "Скачать лучшее видео",
   chooseQuality: "Выбрать качество",
   otherFormats: "Другие форматы",
-  mp3: "Извлечь MP3",
-  transcript: "Извлечь расшифровку",
+  audio: "Извлечь аудио",
   cancel: "Отмена",
   back: "Назад",
 };
@@ -70,6 +78,8 @@ export function policyReasonText(reason: TelegramDisplayPolicyReason | PolicyRea
       return "неизвестный размер";
     case "server_limit":
       return "ограничение сервера по размеру файла";
+    case "telegram_upload_limit":
+      return "лимит Telegram для текущего режима";
     case "insufficient_disk":
       return "недостаточно свободного места на сервере";
     case "queue_full":
@@ -83,14 +93,34 @@ export function formatOptionButtonLabel(
   option: SerializableFormatOption,
   displayPolicy?: TelegramDisplayPolicyState,
 ): string {
-  const size = formatTelegramBytes(option.estimatedSizeBytes);
-  const quality = option.height ? `${option.height}p` : option.resolution;
+  const size = formatTelegramBytesIfKnown(option.estimatedSizeBytes);
+  const quality =
+    option.kind === "audio" || option.value === MP3_FORMAT_ID
+      ? audioFormatButtonLabel(option)
+      : videoFormatButtonLabel(option);
   const reason = displayPolicy?.reason !== "allowed" ? displayPolicy?.reason : option.disabledReason;
   const suffix =
     reason && reason !== "unknown_size" && (option.disabled || displayPolicy?.disabled)
       ? ` - недоступно: ${policyReasonText(reason)}`
       : "";
-  return `${quality} · ${size}${suffix}`;
+  return `${size ? `${quality} · ${size}` : quality}${suffix}`;
+}
+
+export function videoFormatButtonLabel(
+  option: Pick<SerializableFormatOption, "container" | "extension" | "height" | "resolution">,
+): string {
+  if (option.height) return `${option.height}p`;
+  if (option.resolution && option.resolution !== "audio only") return option.resolution;
+  return (option.container ?? option.extension).toUpperCase();
+}
+
+export function audioFormatButtonLabel(
+  option: Pick<SerializableFormatOption, "container" | "extension" | "value">,
+): string {
+  if (option.value === MP3_FORMAT_ID) return "MP3";
+  const container = (option.container ?? option.extension).toLowerCase();
+  if (container === "webm" || container === "weba") return "WEBM Audio";
+  return container.toUpperCase();
 }
 
 export function jobFailedText(code: string | undefined): string {

@@ -1,4 +1,10 @@
 import path from "node:path";
+import {
+  createTelegramUploadPolicy,
+  normalizeTelegramApiRoot,
+  TelegramApiRootConfigError,
+  type TelegramUploadPolicy,
+} from "../adapters/telegram/upload-limits.js";
 import { TuitubeError } from "../core/errors.js";
 import { parseLogLevel, type LogLevel } from "../core/logger.js";
 import { defaultDownloadPolicy, type DownloadPolicyConfig } from "../core/policy/download-policy.js";
@@ -10,6 +16,7 @@ export type TelegramConfig = {
   webhookUrl?: string;
   webhookPath: "/telegram/webhook";
   apiRoot?: string;
+  uploadPolicy: TelegramUploadPolicy;
 };
 
 export type ServerConfig = {
@@ -110,6 +117,19 @@ export function loadServerConfig(env: Record<string, string | undefined> = proce
   }
 
   const downloadDirectory = path.resolve(optionalString(env.DOWNLOAD_DIR) ?? path.join(process.cwd(), "downloads"));
+  let telegramApiRoot: string | undefined;
+  try {
+    telegramApiRoot = normalizeTelegramApiRoot(optionalString(env.TELEGRAM_API_ROOT));
+  } catch (error) {
+    throw new TuitubeError({
+      code: "INVALID_CONFIG",
+      message:
+        error instanceof TelegramApiRootConfigError
+          ? error.message
+          : "TELEGRAM_API_ROOT must be a valid Bot API root URL",
+      severity: "warn",
+    });
+  }
   const maxFileSizeMb = parseInteger(env, "MAX_FILE_SIZE_MB", defaultDownloadPolicy.maxFileSizeMb, {
     min: 1,
     max: 1024 * 50,
@@ -153,7 +173,8 @@ export function loadServerConfig(env: Record<string, string | undefined> = proce
       webhookSecret,
       webhookUrl: optionalString(env.TELEGRAM_WEBHOOK_URL),
       webhookPath: "/telegram/webhook",
-      apiRoot: optionalString(env.TELEGRAM_API_ROOT),
+      apiRoot: telegramApiRoot,
+      uploadPolicy: createTelegramUploadPolicy(telegramApiRoot),
     },
   };
 }

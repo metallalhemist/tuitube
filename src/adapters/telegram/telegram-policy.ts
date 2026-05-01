@@ -1,8 +1,7 @@
 import type { PolicyReason, SerializableFormatOption } from "../../core/types.js";
+import { createTelegramUploadPolicy, type TelegramUploadPolicy } from "./upload-limits.js";
 
-export const TELEGRAM_DISPLAY_TOO_LARGE_BYTES = 2 * 1024 * 1024 * 1024;
-
-export type TelegramDisplayPolicyReason = PolicyReason | "server_limit" | "allowed";
+export type TelegramDisplayPolicyReason = PolicyReason | "server_limit" | "telegram_upload_limit" | "allowed";
 
 export type TelegramDisplayPolicyState = {
   reason: TelegramDisplayPolicyReason;
@@ -10,7 +9,10 @@ export type TelegramDisplayPolicyState = {
   expectedSizeBytes?: number;
 };
 
-export function evaluateTelegramDisplayPolicy(expectedSizeBytes: number | undefined): TelegramDisplayPolicyState {
+export function evaluateTelegramDisplayPolicy(
+  expectedSizeBytes: number | undefined,
+  uploadPolicy: TelegramUploadPolicy = createTelegramUploadPolicy(undefined),
+): TelegramDisplayPolicyState {
   if (expectedSizeBytes === undefined) {
     return {
       reason: "unknown_size",
@@ -18,9 +20,9 @@ export function evaluateTelegramDisplayPolicy(expectedSizeBytes: number | undefi
     };
   }
 
-  if (expectedSizeBytes > TELEGRAM_DISPLAY_TOO_LARGE_BYTES) {
+  if (expectedSizeBytes > uploadPolicy.limitBytes) {
     return {
-      reason: "too_large",
+      reason: "telegram_upload_limit",
       disabled: true,
       expectedSizeBytes,
     };
@@ -33,9 +35,12 @@ export function evaluateTelegramDisplayPolicy(expectedSizeBytes: number | undefi
   };
 }
 
-export function telegramDisplayPolicyForOption(option: SerializableFormatOption): TelegramDisplayPolicyState {
-  const displayPolicy = evaluateTelegramDisplayPolicy(option.estimatedSizeBytes);
-  if (displayPolicy.reason === "too_large" || displayPolicy.reason === "unknown_size") return displayPolicy;
+export function telegramDisplayPolicyForOption(
+  option: SerializableFormatOption,
+  uploadPolicy: TelegramUploadPolicy = createTelegramUploadPolicy(undefined),
+): TelegramDisplayPolicyState {
+  const displayPolicy = evaluateTelegramDisplayPolicy(option.estimatedSizeBytes, uploadPolicy);
+  if (displayPolicy.reason === "telegram_upload_limit" || displayPolicy.reason === "unknown_size") return displayPolicy;
 
   if (option.disabled && option.disabledReason) {
     return {
@@ -47,4 +52,3 @@ export function telegramDisplayPolicyForOption(option: SerializableFormatOption)
 
   return displayPolicy;
 }
-

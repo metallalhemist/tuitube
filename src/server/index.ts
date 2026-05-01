@@ -11,6 +11,7 @@ import { telegramCopy } from "../adapters/telegram/copy.js";
 import { createDownloadMenus } from "../adapters/telegram/menus/download-menu.js";
 import { TelegramMenuSessionStore } from "../adapters/telegram/menu-session-store.js";
 import { TelegramMetadataResultDispatcher } from "../adapters/telegram/metadata-result-dispatcher.js";
+import { isTelegramResultAlreadyNotifiedError } from "../adapters/telegram/result-errors.js";
 import { TelegramResultSender } from "../adapters/telegram/result-sender.js";
 import { buildWebhookUrl, loadServerConfig, redactWebhookUrl } from "./config.js";
 import { createServerApp } from "./app.js";
@@ -25,7 +26,9 @@ async function main(): Promise<void> {
     port: config.port,
     updateMode: config.telegram.updateMode,
     webhookPath: config.telegram.webhookPath,
-    localApiRootEnabled: Boolean(config.telegram.apiRoot),
+    telegramUploadMode: config.telegram.uploadPolicy.mode,
+    localApiRootEnabled: config.telegram.uploadPolicy.isLocalBotApiMode,
+    telegramUploadLimitBytes: config.telegram.uploadPolicy.limitBytes,
   });
 
   const executables = await resolveExecutables({
@@ -64,23 +67,8 @@ async function main(): Promise<void> {
 
   const menus = createDownloadMenus({
     store: menuSessionStore,
+    uploadPolicy: config.telegram.uploadPolicy,
     logger,
-    onRootAction: async ({ ctx, session, action }) => {
-      await ctx.reply(action === "extract_transcript" ? telegramCopy.transcriptStarted : telegramCopy.downloadStarted);
-      const job = await jobService.createMediaJob({
-        action,
-        payload: { url: session.url },
-        chatId: session.chatId,
-      });
-      await ctx.reply(telegramCopy.queueAccepted(job.id)).catch((error: unknown) => {
-        logger.warn("telegram.menu.root.queue_accept_reply_failed", {
-          jobId: job.id,
-          action,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-      return { jobId: job.id };
-    },
     onFormatSelected: async ({ ctx, session, formatValue }) => {
       await ctx.reply(telegramCopy.downloadStarted);
       const job = await jobService.createMediaJob({
@@ -118,9 +106,10 @@ async function main(): Promise<void> {
     api: bot.api,
     store: menuSessionStore,
     menus,
+    uploadPolicy: config.telegram.uploadPolicy,
     logger,
   });
-  const resultSender = new TelegramResultSender({ api: bot.api, logger });
+  const resultSender = new TelegramResultSender({ api: bot.api, uploadPolicy: config.telegram.uploadPolicy, logger });
   const worker = new DownloadWorker({
     queue,
     jobService,
@@ -131,9 +120,17 @@ async function main(): Promise<void> {
     onMetadataPrepared: async (job, snapshot) => metadataDispatcher.dispatchPrepared(job, snapshot),
     onJobCompleted: async (job, result) => resultSender.sendDownload(job, result),
     onTranscriptCompleted: async (job, result) => resultSender.sendTranscript(job, result),
-    onJobFailed: async (job) => {
+    onJobFailed: async (job, error) => {
       if (job.action === "prepare_metadata") {
         await metadataDispatcher.dispatchFailed(job);
+        return;
+      }
+
+      if (isTelegramResultAlreadyNotifiedError(error)) {
+        logger.debug("telegram.result_sender.failure_suppressed_already_notified", {
+          jobId: job.id,
+          action: job.action,
+        });
         return;
       }
 

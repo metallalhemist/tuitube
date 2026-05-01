@@ -128,7 +128,7 @@ export async function downloadVideo({
   onStdoutLine,
   onStderrLine,
 }: DownloadVideoCommand): Promise<string> {
-  logger.debug("ytdlp.download.start", { outputDirectory, formatValue });
+  logger.debug("ytdlp.download.start", { hasOutputDirectory: Boolean(outputDirectory), formatValue });
   assertValidUrl(url);
   const result = await withPrivateNetworkDeniedProxy({ forceIpv4, logger }, async (proxyUrl) => {
     const [downloadFormat, targetContainer] = formatValue.split("#");
@@ -180,7 +180,7 @@ export async function downloadVideo({
     });
   }
 
-  logger.debug("ytdlp.download.finish", { filePath });
+  logger.debug("ytdlp.download.finish", { extension: path.extname(filePath).toLowerCase(), hasFilePath: true });
   return filePath;
 }
 
@@ -197,7 +197,7 @@ export async function downloadAndConvertSubtitles({
   env,
   logger = noopLogger,
 }: DownloadSubtitleCommand): Promise<string> {
-  logger.debug("ytdlp.subtitles.start", { language, outputDirectory });
+  logger.debug("ytdlp.subtitles.start", { language, hasOutputDirectory: Boolean(outputDirectory) });
   assertValidUrl(url);
   await withPrivateNetworkDeniedProxy({ forceIpv4, logger }, async (proxyUrl) => {
     const args = [
@@ -243,6 +243,6 @@ export async function downloadAndConvertSubtitles({
   }
 
   const subtitlePath = path.join(outputDirectory, subtitleFile);
-  logger.debug("ytdlp.subtitles.finish", { language, subtitlePath });
+  logger.debug("ytdlp.subtitles.finish", { language, extension: path.extname(subtitlePath).toLowerCase() });
   return subtitlePath;
 }

@@ -12,6 +12,7 @@ import {
 export const DOWNLOAD_ROOT_MENU_ID = "tuitube-download-root";
 export const DOWNLOAD_CONTAINER_MENU_ID = "tuitube-download-container";
 export const DOWNLOAD_QUALITY_MENU_ID = "tuitube-download-quality";
+export const DOWNLOAD_AUDIO_MENU_ID = "tuitube-download-audio";
 
 export type MenuLookupResult =
   | { status: "found"; session: TelegramMenuSession; key: TelegramMenuSessionKey }
@@ -48,10 +49,7 @@ export async function renderMenuMarkup<C extends TelegramMenuContext>(
   };
 }
 
-export function createSyntheticMenuContext(
-  chatId: string,
-  messageId: number,
-): TelegramMenuContext {
+export function createSyntheticMenuContext(chatId: string, messageId: number): TelegramMenuContext {
   return {
     callbackQuery: {
       message: {

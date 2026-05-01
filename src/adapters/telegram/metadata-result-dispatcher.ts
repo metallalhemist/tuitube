@@ -5,6 +5,8 @@ import { isFirstScreenMp4Option } from "../../core/format-selection.js";
 import { telegramCopy } from "./copy.js";
 import type { TelegramMenuSessionStore } from "./menu-session-store.js";
 import type { DownloadMenus } from "./menus/download-menu.js";
+import { telegramDisplayPolicyForOption } from "./telegram-policy.js";
+import { createTelegramUploadPolicy, type TelegramUploadPolicy } from "./upload-limits.js";
 
 export type TelegramMetadataApi = {
   sendMessage(chatId: string, text: string): Promise<{ message_id: number }>;
@@ -31,12 +33,17 @@ export class TelegramMetadataResultDispatcher {
       api: TelegramMetadataApi;
       store: TelegramMenuSessionStore;
       menus: Pick<DownloadMenus, "renderRootMenuMarkup">;
+      uploadPolicy?: TelegramUploadPolicy;
       logger?: Logger;
     },
   ) {}
 
   private get logger(): Logger {
     return this.options.logger ?? noopLogger;
+  }
+
+  private get uploadPolicy(): TelegramUploadPolicy {
+    return this.options.uploadPolicy ?? createTelegramUploadPolicy(undefined);
   }
 
   async dispatchPrepared(job: MediaJob, snapshot: VideoSelectionSnapshot): Promise<void> {
@@ -47,9 +54,22 @@ export class TelegramMetadataResultDispatcher {
 
     this.logger.info("telegram.metadata_dispatch.start", { jobId: job.id, hasChatId: true });
     try {
-      const hasMp4WithoutRecoding = snapshot.formatOptions.some(
-        (option) => isFirstScreenMp4Option(option) && !option.disabled,
-      );
+      const uploadPolicy = this.uploadPolicy;
+      const hasMp4WithoutRecoding = snapshot.formatOptions.some((option) => {
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+        return isFirstScreenMp4Option(option) && !option.disabled && !displayPolicy.disabled;
+      });
+      for (const option of snapshot.formatOptions) {
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+        this.logger.debug("telegram.metadata_dispatch.upload_policy", {
+          jobId: job.id,
+          uploadMode: uploadPolicy.mode,
+          limitBytes: uploadPolicy.limitBytes,
+          optionId: option.id,
+          reason: displayPolicy.reason,
+          disabled: displayPolicy.disabled,
+        });
+      }
       this.logger.info("telegram.metadata_dispatch.formats", {
         jobId: job.id,
         formatCount: snapshot.formatOptions.length,
@@ -58,10 +78,7 @@ export class TelegramMetadataResultDispatcher {
         firstScreenMp4Count: snapshot.formatOptions.filter(isFirstScreenMp4Option).length,
       });
       const messageText = telegramCopy.mainMenuTitle(snapshot.title, snapshot.duration, { hasMp4WithoutRecoding });
-      const sentMessage = await this.options.api.sendMessage(
-        job.chatId,
-        messageText,
-      );
+      const sentMessage = await this.options.api.sendMessage(job.chatId, messageText);
       this.options.store.create({
         chatId: job.chatId,
         messageId: sentMessage.message_id,
@@ -72,12 +89,9 @@ export class TelegramMetadataResultDispatcher {
       });
 
       const replyMarkup = await this.options.menus.renderRootMenuMarkup(job.chatId, sentMessage.message_id);
-      await this.options.api.editMessageText(
-        job.chatId,
-        sentMessage.message_id,
-        messageText,
-        { reply_markup: replyMarkup },
-      );
+      await this.options.api.editMessageText(job.chatId, sentMessage.message_id, messageText, {
+        reply_markup: replyMarkup,
+      });
 
       this.logger.info("telegram.metadata_dispatch.finish", {
         jobId: job.id,
