@@ -8,10 +8,11 @@
 > - https://core.telegram.org/bots/api#getfile
 > - https://core.telegram.org/bots/api#senddocument
 > - https://core.telegram.org/bots/api#sendvideo
+> - https://core.telegram.org/bots/features#local-bot-api
 > - https://core.telegram.org/bots/self-signed
 > - https://github.com/tdlib/telegram-bot-api
 > Created: 2026-04-27
-> Updated: 2026-04-27
+> Updated: 2026-05-01
 
 ## Overview
 
@@ -169,6 +170,15 @@ Telegram documents three file-sending modes:
 ## Local Bot API Server
 
 The local Bot API server lets a bot send Bot API requests to a self-hosted server instead of `https://api.telegram.org`.
+
+The Telegram Bot Features page summarizes the deployment limits as:
+
+| API mode | Max file download | Max file upload | Webhook URL | Webhook port | Webhook max connections |
+| --- | --- | --- | --- | --- | --- |
+| Official | `20 MB` | `50 MB` | HTTPS | `443`, `80`, `88`, `8443` | `1-100` |
+| Local | Unlimited | `2000 MB` | HTTP | Any port | `1-100000` |
+
+The same page says to use `logOut` before redirecting requests to a new local API URL and notes that local Bot API accepts HTTP requests only.
 
 Source-documented local server capabilities:
 
