@@ -10,9 +10,13 @@ import {
 } from "./copy.js";
 import {
   evaluateTelegramDisplayPolicy,
-  TELEGRAM_DISPLAY_TOO_LARGE_BYTES,
   telegramDisplayPolicyForOption,
 } from "./telegram-policy.js";
+import {
+  createTelegramUploadPolicy,
+  TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES,
+  TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES,
+} from "./upload-limits.js";
 
 function option(overrides: Partial<SerializableFormatOption> = {}): SerializableFormatOption {
   return {
@@ -32,14 +36,28 @@ function option(overrides: Partial<SerializableFormatOption> = {}): Serializable
 describe("telegram copy and display policy", () => {
   it("uses Russian copy for common messages", () => {
     expect(telegramCopy.start).toContain("Пришлите ссылку");
+    expect(telegramCopy.start).not.toContain("расшифров");
+    expect(telegramCopy.mainMenuTitle("Title", 30)).not.toContain("расшифров");
     expect(telegramCopy.invalidUrl).toContain("Не похоже");
     expect(telegramCopy.queueAccepted("job-1")).toContain("Задача принята");
     expect(jobFailedText("SUBTITLE_NOT_FOUND")).toContain("не найдены");
   });
 
-  it("shows too_large only above the 2 GiB Telegram display threshold", () => {
-    expect(evaluateTelegramDisplayPolicy(TELEGRAM_DISPLAY_TOO_LARGE_BYTES).reason).toBe("allowed");
-    expect(evaluateTelegramDisplayPolicy(TELEGRAM_DISPLAY_TOO_LARGE_BYTES + 1).reason).toBe("too_large");
+  it("uses cloud or Local Bot API upload limits for menu display policy", () => {
+    expect(evaluateTelegramDisplayPolicy(TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES).reason).toBe("allowed");
+    expect(evaluateTelegramDisplayPolicy(TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1).reason).toBe("telegram_upload_limit");
+    expect(
+      evaluateTelegramDisplayPolicy(
+        TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1,
+        createTelegramUploadPolicy("http://127.0.0.1:18081"),
+      ).reason,
+    ).toBe("allowed");
+    expect(
+      evaluateTelegramDisplayPolicy(
+        TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES + 1,
+        createTelegramUploadPolicy("http://127.0.0.1:18081"),
+      ).reason,
+    ).toBe("telegram_upload_limit");
     expect(evaluateTelegramDisplayPolicy(undefined).reason).toBe("unknown_size");
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TelegramMenuSessionStore } from "../menu-session-store.js";
 import type { SerializableFormatOption } from "../../../core/types.js";
 import { MP3_FORMAT_ID } from "../../../core/format-selection.js";
+import { TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES } from "../upload-limits.js";
 import { createDownloadMenus } from "./download-menu.js";
 import {
   DOWNLOAD_AUDIO_MENU_ID,
@@ -68,6 +69,17 @@ const m4aOption: SerializableFormatOption = {
   estimatedSizeBytes: 80,
 };
 
+const opusOption: SerializableFormatOption = {
+  ...m4aOption,
+  id: "251#opus",
+  value: "251#opus",
+  extension: "opus",
+  formatId: "251",
+  container: "opus",
+  containerLabel: "OPUS Audio",
+  estimatedSizeBytes: 90,
+};
+
 describe("download menu", () => {
   it("lays out short labels two per row and long labels one per row", () => {
     expect(layoutMenuRows([{ label: "360p" }, { label: "720p" }, { label: "1080p" }])).toEqual([
@@ -93,6 +105,7 @@ describe("download menu", () => {
         { ...enabledOption, id: "137+140#mp4", value: "137+140#mp4", formatId: "137+140", height: 1080, resolution: "1080p" },
         webmOption,
         m4aOption,
+        opusOption,
         mp3Option,
       ],
     });
@@ -113,6 +126,8 @@ describe("download menu", () => {
     const containerMarkup = await renderMenuMarkup(menus.containerMenu, createSyntheticMenuContext("123", 10));
     expect(containerMarkup.inline_keyboard.flat().map((button) => button.text)).toContain("WEBM");
     expect(containerMarkup.inline_keyboard.flat().map((button) => button.text)).not.toContain("MP4");
+    expect(containerMarkup.inline_keyboard.flat().map((button) => button.text)).not.toContain("M4A");
+    expect(containerMarkup.inline_keyboard.flat().map((button) => button.text)).not.toContain("MP3");
 
     store.update({ chatId: "123", messageId: 10 }, { state: "quality", selectedContainer: "webm" });
     const qualityMarkup = await renderMenuMarkup(menus.qualityMenu, createSyntheticMenuContext("123", 10));
@@ -120,7 +135,50 @@ describe("download menu", () => {
 
     const audioMarkup = await renderMenuMarkup(menus.audioMenu, createSyntheticMenuContext("123", 10));
     expect(audioMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("M4A");
+    expect(audioMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("OPUS");
     expect(audioMarkup.inline_keyboard.flat().map((button) => button.text).join(" ")).toContain("MP3");
+  });
+
+  it("keeps long rendered root, video, and audio labels on one-button rows", async () => {
+    const largeMp4 = {
+      ...enabledOption,
+      estimatedSizeBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1,
+      policy: { disabled: false, expectedSizeBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1 },
+    };
+    const largeWebm = {
+      ...webmOption,
+      estimatedSizeBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1,
+      policy: { disabled: false, expectedSizeBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1 },
+    };
+    const largeAudio = {
+      ...m4aOption,
+      estimatedSizeBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1,
+      policy: { disabled: false, expectedSizeBytes: TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES + 1 },
+    };
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 12,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [largeMp4, enabledOption, largeWebm, webmOption, largeAudio, m4aOption],
+    });
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel: vi.fn(async () => undefined),
+    });
+
+    const rootMarkup = await menus.renderRootMenuMarkup("123", 12);
+    expect(rootMarkup.inline_keyboard[0]).toHaveLength(1);
+
+    store.update({ chatId: "123", messageId: 12 }, { state: "quality", selectedContainer: "webm" });
+    const qualityMarkup = await renderMenuMarkup(menus.qualityMenu, createSyntheticMenuContext("123", 12));
+    expect(qualityMarkup.inline_keyboard[0]).toHaveLength(1);
+
+    const audioMarkup = await renderMenuMarkup(menus.audioMenu, createSyntheticMenuContext("123", 12));
+    expect(audioMarkup.inline_keyboard[0]).toHaveLength(1);
   });
 
   it("registers nested container and quality submenus under stable ids", () => {

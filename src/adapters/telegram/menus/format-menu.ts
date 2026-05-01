@@ -8,6 +8,7 @@ import {
 import { noopLogger, type Logger } from "../../../core/logger.js";
 import { formatOptionButtonLabel, telegramButtons, telegramCopy } from "../copy.js";
 import { telegramDisplayPolicyForOption } from "../telegram-policy.js";
+import { createTelegramUploadPolicy, type TelegramUploadPolicy } from "../upload-limits.js";
 import type { TelegramMenuContext } from "../context.js";
 import type { TelegramMenuSession, TelegramMenuSessionStore } from "../menu-session-store.js";
 import {
@@ -87,10 +88,12 @@ export function createContainerMenu({
 export function createFormatMenu({
   store,
   onFormatSelected,
+  uploadPolicy = createTelegramUploadPolicy(undefined),
   logger = noopLogger,
 }: {
   store: TelegramMenuSessionStore;
   onFormatSelected: FormatMenuActionHandler;
+  uploadPolicy?: TelegramUploadPolicy;
   logger?: Logger;
 }): Menu<TelegramMenuContext> {
   const menu = new Menu<TelegramMenuContext>(DOWNLOAD_QUALITY_MENU_ID, {
@@ -122,7 +125,7 @@ export function createFormatMenu({
     const dynamicRange = new MenuRange<TelegramMenuContext>();
     const options = getVideoFormatOptionsForContainer(lookup.session.formatOptions, lookup.session.selectedContainer);
     const buttonItems = options.map((option) => ({
-      label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option)),
+      label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option, uploadPolicy)),
       option,
     }));
     const rows = layoutMenuRows(buttonItems);
@@ -137,7 +140,7 @@ export function createFormatMenu({
     for (const row of rows) {
       for (const item of row) {
         const option = item.option;
-      const displayPolicy = telegramDisplayPolicyForOption(option);
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
       dynamicRange.text(item.label, async (callbackCtx) => {
         logger.debug("telegram.menu.format.action", {
           sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
@@ -198,10 +201,12 @@ export function createFormatMenu({
 export function createAudioMenu({
   store,
   onFormatSelected,
+  uploadPolicy = createTelegramUploadPolicy(undefined),
   logger = noopLogger,
 }: {
   store: TelegramMenuSessionStore;
   onFormatSelected: FormatMenuActionHandler;
+  uploadPolicy?: TelegramUploadPolicy;
   logger?: Logger;
 }): Menu<TelegramMenuContext> {
   const menu = new Menu<TelegramMenuContext>(DOWNLOAD_AUDIO_MENU_ID, {
@@ -224,7 +229,7 @@ export function createAudioMenu({
     }
 
     const buttonItems = getAudioFormatOptions(lookup.session.formatOptions).map((option) => ({
-      label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option)),
+      label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option, uploadPolicy)),
       option,
     }));
     const rows = layoutMenuRows(buttonItems);
@@ -239,7 +244,7 @@ export function createAudioMenu({
     for (const row of rows) {
       for (const item of row) {
         const option = item.option;
-        const displayPolicy = telegramDisplayPolicyForOption(option);
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
         dynamicRange.text(item.label, async (callbackCtx) => {
           logger.debug("telegram.menu.audio.action", {
             sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,

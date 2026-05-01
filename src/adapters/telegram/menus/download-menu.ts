@@ -7,6 +7,7 @@ import { formatOptionButtonLabel, telegramButtons, telegramCopy } from "../copy.
 import type { TelegramMenuContext } from "../context.js";
 import type { TelegramMenuSession, TelegramMenuSessionStore } from "../menu-session-store.js";
 import { telegramDisplayPolicyForOption } from "../telegram-policy.js";
+import { createTelegramUploadPolicy, type TelegramUploadPolicy } from "../upload-limits.js";
 import { createAudioMenu, createContainerMenu, createFormatMenu, type FormatMenuActionHandler } from "./format-menu.js";
 import { layoutMenuRows } from "./menu-layout.js";
 import {
@@ -38,11 +39,13 @@ export function createDownloadMenus({
   store,
   onFormatSelected,
   onCancel,
+  uploadPolicy = createTelegramUploadPolicy(undefined),
   logger = noopLogger,
 }: {
   store: TelegramMenuSessionStore;
   onFormatSelected: FormatMenuActionHandler;
   onCancel: RootMenuCancelHandler;
+  uploadPolicy?: TelegramUploadPolicy;
   logger?: Logger;
 }): DownloadMenus {
   const rootMenu = new Menu<TelegramMenuContext>(DOWNLOAD_ROOT_MENU_ID, {
@@ -54,8 +57,8 @@ export function createDownloadMenus({
     },
   });
   const containerMenu = createContainerMenu({ store, logger });
-  const qualityMenu = createFormatMenu({ store, onFormatSelected, logger });
-  const audioMenu = createAudioMenu({ store, onFormatSelected, logger });
+  const qualityMenu = createFormatMenu({ store, onFormatSelected, uploadPolicy, logger });
+  const audioMenu = createAudioMenu({ store, onFormatSelected, uploadPolicy, logger });
 
   const runFormatSelection = (option: SerializableFormatOption) => async (ctx: TelegramMenuContext) => {
     const lookup = getMenuSessionLookup(ctx, store);
@@ -65,7 +68,7 @@ export function createDownloadMenus({
       return;
     }
 
-    const displayPolicy = telegramDisplayPolicyForOption(option);
+    const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
     logger.debug("telegram.menu.root.mp4_action", {
       sessionKey: `${lookup.key.chatId}:${lookup.key.messageId}`,
       formatId: option.formatId,
@@ -112,7 +115,7 @@ export function createDownloadMenus({
 
       const dynamicRange = new MenuRange<TelegramMenuContext>();
       const buttonItems = getRootMp4FormatOptions(lookup.session.formatOptions).map((option) => ({
-        label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option)),
+        label: formatOptionButtonLabel(option, telegramDisplayPolicyForOption(option, uploadPolicy)),
         option,
       }));
       const rows = layoutMenuRows(buttonItems);

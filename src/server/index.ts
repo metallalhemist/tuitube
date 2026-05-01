@@ -67,6 +67,7 @@ async function main(): Promise<void> {
 
   const menus = createDownloadMenus({
     store: menuSessionStore,
+    uploadPolicy: config.telegram.uploadPolicy,
     logger,
     onFormatSelected: async ({ ctx, session, formatValue }) => {
       await ctx.reply(telegramCopy.downloadStarted);
@@ -105,6 +106,7 @@ async function main(): Promise<void> {
     api: bot.api,
     store: menuSessionStore,
     menus,
+    uploadPolicy: config.telegram.uploadPolicy,
     logger,
   });
   const resultSender = new TelegramResultSender({ api: bot.api, uploadPolicy: config.telegram.uploadPolicy, logger });

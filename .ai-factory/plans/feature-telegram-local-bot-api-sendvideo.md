@@ -104,14 +104,14 @@ Open questions:
 
 ### Phase 3: Job/Action Cleanup
 
-- [ ] Task 8: Remove Telegram menu usage of transcript and root MP3 actions.
+- [x] Task 8: Remove Telegram menu usage of transcript and root MP3 actions.
   - [ ] Deliverable: stop using `extract_transcript` and `extract_mp3` from Telegram menu handlers while leaving `TranscriptService`, `src/transcript.ts`, and Termcast tools untouched.
   - [ ] Expected behavior: Telegram menu can no longer enqueue transcript jobs. MP3 downloads go through `download_format` with `MP3_FORMAT_ID`. Keep legacy `MediaJobAction` values `extract_mp3` and `extract_transcript` worker-compatible for old queued jobs/tests in this iteration, mark them as compatibility-only, and remove them from Telegram menu/UI types and server menu handlers. In particular, remove `extract_mp3` and `extract_transcript` from `RootMenuAction`, `getRootActionAvailability`, `onRootAction`, and `src/server/index.ts` menu composition so no new Telegram menu callback can create those actions. Do not remove `TranscriptService`, `src/transcript.ts`, or Termcast transcript tools in this plan.
   - [ ] Files: `src/adapters/telegram/menus/download-menu.ts`, `src/server/index.ts`, `src/core/jobs/queue.ts`, `src/core/jobs/download-worker.ts`, `src/core/jobs/jobs.test.ts`.
   - [ ] Logging requirements: log compatibility fallback use at `WARN` if legacy actions remain reachable outside the new menu; normal audio downloads log as `download_format`.
   - [ ] Dependencies: tasks 6 and 7.
 
-- [ ] Task 9: Align metadata dispatch and display policy with upload limits.
+- [x] Task 9: Align metadata dispatch and display policy with upload limits.
   - [ ] Deliverable: ensure menu presentation does not imply cloud Bot API can send files over 50 MB.
   - [ ] Expected behavior: when `TELEGRAM_API_ROOT` is unset, MP4/video options whose estimated size exceeds cloud upload limit are disabled or clearly marked as unavailable for Telegram send; when local mode is enabled, the display limit is 2000 MB. Add a distinct Telegram display-policy reason such as `telegram_upload_limit` for cloud/local upload-limit decisions instead of reusing core `too_large` or `server_limit`. Because this reason is adapter-local and not a core `PolicyReason`, update `TelegramDisplayPolicyReason`, copy helpers, menu availability types, and any render/action logic that currently assumes only core policy reasons. Unknown sizes may remain selectable only if current server policy allows them, but copy must not promise deliverability. Keep `too_large` vs server/download policy distinctions clear.
   - [ ] Files: `src/adapters/telegram/telegram-policy.ts`, `src/adapters/telegram/metadata-result-dispatcher.ts`, `src/adapters/telegram/copy.ts`, `src/server/index.ts`, `src/adapters/telegram/metadata-result-dispatcher.test.ts`.
@@ -120,14 +120,14 @@ Open questions:
 
 ### Phase 4: Tests And Verification
 
-- [ ] Task 10: Add focused unit coverage for menu selectors, labels, and navigation.
+- [x] Task 10: Add focused unit coverage for menu selectors, labels, and navigation.
   - [ ] Deliverable: cover the new root, Other Formats, Audio menu, and pure selector behavior.
   - [ ] Expected behavior: tests assert root menu does not contain `Извлечь MP3` or `Извлечь расшифровку`; root contains `Извлечь аудио`; root MP4 options are two per row when labels are short; long root/video/audio labels remain one per row; Other Formats excludes audio and excludes MP4 when root has MP4; Other Formats includes WEBM video as `WEBM`; WEBM video is not labeled `WEBM Audio`; Audio menu contains M4A/OPUS/MP3 options; unknown-size labels do not contain `неизвестный размер`; `/start` and main-menu copy do not advertise transcript extraction as a Telegram menu action.
   - [ ] Files: `src/core/helpers.test.ts`, `src/adapters/telegram/menus/download-menu.test.ts`, `src/adapters/telegram/copy.test.ts`.
   - [ ] Logging requirements: tests should use stub loggers and assert key warning paths without snapshotting noisy or sensitive payloads.
   - [ ] Dependencies: tasks 4-7.
 
-- [ ] Task 11: Add result-sender and config tests for upload limits and sendVideo.
+- [x] Task 11: Add result-sender and config tests for upload limits and sendVideo.
   - [ ] Deliverable: cover MP4/video delivery, non-MP4 document fallback, stat-based size enforcement, and Telegram API error mapping.
   - [ ] Expected behavior: `.mp4` calls `sendVideo` with `supports_streaming: true`; WEBM and non-MP4 call `sendDocument`; cloud mode rejects actual files over 50 MB with readable Russian copy; local mode allows files up to 2000 MB; 413/Request Entity Too Large/file-is-too-big maps to the readable too-large send failure copy; already-notified send failures do not trigger a second generic Telegram failure message from `onJobFailed`; config tests verify `TELEGRAM_API_ROOT` normalization, rejection of `/bot<TOKEN>` suffixes, local mode, and upload limit selection.
   - [ ] Files: `src/adapters/telegram/result-sender.test.ts`, `src/server/server.test.ts`, optional `src/adapters/telegram/upload-limits.test.ts`.

@@ -35,7 +35,7 @@ export const telegramCopy = {
   mainMenuTitle: (title: string, duration: number, options: { hasMp4WithoutRecoding?: boolean } = {}) => {
     const mp4Line =
       options.hasMp4WithoutRecoding === false
-        ? "\nMP4 без перекодирования не найден. Выберите другой доступный формат."
+        ? "\nMP4 для отправки сейчас недоступен. Выберите другой доступный формат."
         : "";
     return `Видео: ${title}\nДлительность: ${formatTelegramDuration(duration)}${mp4Line}\nВыберите формат:`;
   },
@@ -79,6 +79,8 @@ export function policyReasonText(reason: TelegramDisplayPolicyReason | PolicyRea
       return "неизвестный размер";
     case "server_limit":
       return "ограничение сервера по размеру файла";
+    case "telegram_upload_limit":
+      return "лимит Telegram для текущего режима";
     case "insufficient_disk":
       return "недостаточно свободного места на сервере";
     case "queue_full":

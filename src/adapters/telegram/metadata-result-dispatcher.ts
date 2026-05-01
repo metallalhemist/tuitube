@@ -5,6 +5,8 @@ import { isFirstScreenMp4Option } from "../../core/format-selection.js";
 import { telegramCopy } from "./copy.js";
 import type { TelegramMenuSessionStore } from "./menu-session-store.js";
 import type { DownloadMenus } from "./menus/download-menu.js";
+import { telegramDisplayPolicyForOption } from "./telegram-policy.js";
+import { createTelegramUploadPolicy, type TelegramUploadPolicy } from "./upload-limits.js";
 
 export type TelegramMetadataApi = {
   sendMessage(chatId: string, text: string): Promise<{ message_id: number }>;
@@ -31,12 +33,17 @@ export class TelegramMetadataResultDispatcher {
       api: TelegramMetadataApi;
       store: TelegramMenuSessionStore;
       menus: Pick<DownloadMenus, "renderRootMenuMarkup">;
+      uploadPolicy?: TelegramUploadPolicy;
       logger?: Logger;
     },
   ) {}
 
   private get logger(): Logger {
     return this.options.logger ?? noopLogger;
+  }
+
+  private get uploadPolicy(): TelegramUploadPolicy {
+    return this.options.uploadPolicy ?? createTelegramUploadPolicy(undefined);
   }
 
   async dispatchPrepared(job: MediaJob, snapshot: VideoSelectionSnapshot): Promise<void> {
@@ -47,9 +54,22 @@ export class TelegramMetadataResultDispatcher {
 
     this.logger.info("telegram.metadata_dispatch.start", { jobId: job.id, hasChatId: true });
     try {
-      const hasMp4WithoutRecoding = snapshot.formatOptions.some(
-        (option) => isFirstScreenMp4Option(option) && !option.disabled,
-      );
+      const uploadPolicy = this.uploadPolicy;
+      const hasMp4WithoutRecoding = snapshot.formatOptions.some((option) => {
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+        return isFirstScreenMp4Option(option) && !option.disabled && !displayPolicy.disabled;
+      });
+      for (const option of snapshot.formatOptions) {
+        const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+        this.logger.debug("telegram.metadata_dispatch.upload_policy", {
+          jobId: job.id,
+          uploadMode: uploadPolicy.mode,
+          limitBytes: uploadPolicy.limitBytes,
+          optionId: option.id,
+          reason: displayPolicy.reason,
+          disabled: displayPolicy.disabled,
+        });
+      }
       this.logger.info("telegram.metadata_dispatch.formats", {
         jobId: job.id,
         formatCount: snapshot.formatOptions.length,

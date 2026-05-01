@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { TuitubeError } from "../errors.js";
+import { MP3_FORMAT_ID } from "../format-selection.js";
+import type { Logger } from "../logger.js";
 import type { VideoDownloadService } from "../services/video-download-service.js";
 import { InMemoryJobQueue } from "./in-memory-queue.js";
 import { JobService } from "./job-service.js";
@@ -14,6 +16,15 @@ function job(id: string): DownloadJob {
     status: "queued",
     createdAt: new Date(),
     updatedAt: new Date(),
+  };
+}
+
+function testLogger(): Logger & { warn: ReturnType<typeof vi.fn> } {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   };
 }
 
@@ -173,6 +184,43 @@ describe("jobs", () => {
       }),
       error,
     );
+    await worker.stop({ timeoutMs: 100 });
+  });
+
+  it("keeps legacy extract_mp3 jobs worker-compatible as MP3 download_format fallback", async () => {
+    const queue = new InMemoryJobQueue<DownloadJob>({ maxSize: 5 });
+    const jobService = new JobService(queue);
+    const created = await jobService.createMediaJob({
+      action: "extract_mp3",
+      payload: { url: "https://example.com/video" },
+      chatId: "123",
+    });
+    const cleanup = vi.fn(async () => undefined);
+    const download = vi.fn(async () => ({
+      filePath: "/tmp/audio.mp3",
+      fileName: "audio.mp3",
+      title: "Title",
+      duration: 30,
+      jobId: "temp-job",
+      cleanup,
+    }));
+    const logger = testLogger();
+    const worker = new DownloadWorker({
+      queue,
+      jobService,
+      downloadService: { download } as unknown as VideoDownloadService,
+      maxConcurrency: 1,
+      logger,
+    });
+
+    worker.start();
+
+    await vi.waitFor(() => expect(jobService.getJob(created.id)?.status).toBe("completed"));
+    expect(download).toHaveBeenCalledWith(expect.objectContaining({ formatValue: MP3_FORMAT_ID }));
+    expect(logger.warn).toHaveBeenCalledWith("download_worker.compatibility_action", {
+      jobId: created.id,
+      action: "extract_mp3",
+    });
     await worker.stop({ timeoutMs: 100 });
   });
 

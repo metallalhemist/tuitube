@@ -7,7 +7,9 @@ export type MediaJobAction =
   | "prepare_metadata"
   | "download_best"
   | "download_format"
+  // Compatibility-only for jobs created by older Telegram menu flows.
   | "extract_mp3"
+  // Compatibility-only for jobs created by older Telegram menu flows.
   | "extract_transcript";
 
 export type MediaJobPayload = {

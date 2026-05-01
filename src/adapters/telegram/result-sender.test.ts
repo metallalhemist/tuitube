@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { MediaJob } from "../../core/jobs/queue.js";
 import type { DownloadResult } from "../../core/types.js";
-import { TelegramResultAlreadyNotifiedError } from "./result-errors.js";
+import { TelegramResultAlreadyNotifiedError, isTelegramResultAlreadyNotifiedError } from "./result-errors.js";
 import { TelegramResultSender } from "./result-sender.js";
 import { createTelegramUploadPolicy, TELEGRAM_CLOUD_UPLOAD_LIMIT_BYTES } from "./upload-limits.js";
 
@@ -158,9 +158,14 @@ describe("TelegramResultSender", () => {
     });
     const sender = new TelegramResultSender({ api });
 
-    await expect(withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(job, download))).rejects.toBeInstanceOf(
-      TelegramResultAlreadyNotifiedError,
-    );
+    let thrown: unknown;
+    try {
+      await withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(job, download));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(TelegramResultAlreadyNotifiedError);
+    expect(isTelegramResultAlreadyNotifiedError(thrown)).toBe(true);
     expect(api.sendMessage).toHaveBeenCalledWith("123", expect.stringContaining("отправить"));
   });
 });
