@@ -53,9 +53,11 @@ describe("TelegramMetadataResultDispatcher", () => {
       },
     });
 
-    await dispatcher.dispatchPrepared(job, snapshot);
+    await dispatcher.dispatchPrepared({ ...job, payload: { ...job.payload, requesterUserId: "42" } }, snapshot);
 
-    expect(store.get({ chatId: "123", messageId: 77 }).status).toBe("found");
+    const lookup = store.get({ chatId: "123", messageId: 77 });
+    expect(lookup.status).toBe("found");
+    expect(lookup.status === "found" ? lookup.session.requesterUserId : undefined).toBe("42");
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.editMessageText).toHaveBeenCalledWith("123", 77, expect.stringContaining("Видео: Title"), {
       reply_markup: { inline_keyboard: [] },

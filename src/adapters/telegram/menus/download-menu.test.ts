@@ -103,6 +103,7 @@ async function invokeRootButton(
   chatId: string,
   messageId: number,
   buttonText: string,
+  options: { fromId?: number; chatType?: "private" | "group" | "supergroup" } = {},
 ): Promise<Array<{ method: string; payload: unknown }>> {
   const markup = await menus.renderRootMenuMarkup(chatId, messageId);
   const button = markup.inline_keyboard.flat().find((candidate) => candidate.text === buttonText) as
@@ -110,6 +111,16 @@ async function invokeRootButton(
     | undefined;
   if (!button?.callback_data) throw new Error(`Button not found or has no callback data: ${buttonText}`);
 
+  return invokeMenuCallback(menus, chatId, messageId, button.callback_data, options);
+}
+
+async function invokeMenuCallback(
+  menus: DownloadMenus,
+  chatId: string,
+  messageId: number,
+  callbackData: string,
+  options: { fromId?: number; chatType?: "private" | "group" | "supergroup" } = {},
+): Promise<Array<{ method: string; payload: unknown }>> {
   const bot = new Bot<TelegramMenuContext>("123:token", { botInfo });
   const calls: Array<{ method: string; payload: unknown }> = [];
   bot.api.config.use(async (_previous, method, payload) => {
@@ -122,15 +133,15 @@ async function invokeRootButton(
     update_id: 1,
     callback_query: {
       id: "callback-1",
-      from: { id: 1, is_bot: false, first_name: "User" },
+      from: { id: options.fromId ?? 1, is_bot: false, first_name: "User" },
       chat_instance: "instance-1",
       message: {
         message_id: messageId,
         date: 0,
-        chat: { id: Number(chatId), type: "private" },
+        chat: { id: Number(chatId), type: options.chatType ?? "private" },
         text: "menu",
       },
-      data: button.callback_data,
+      data: callbackData,
     },
   } as never);
 
@@ -334,5 +345,228 @@ describe("download menu", () => {
         .map((button) => button.text)
         .join(" "),
     ).toContain("unknown");
+  });
+
+  it("updates the original menu message to progress after format selection without follow-up replies", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 14,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption],
+    });
+    const onFormatSelected = vi.fn(async () => ({ jobId: "job-1" }));
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected,
+      onCancel: vi.fn(async () => undefined),
+    });
+    const buttonText = (await menus.renderRootMenuMarkup("123", 14)).inline_keyboard.flat()[0]?.text;
+
+    const calls = await invokeRootButton(menus, "123", 14, buttonText ?? "");
+    const lookup = store.get({ chatId: "123", messageId: 14 });
+
+    expect(calls.map((call) => call.method)).not.toContain("sendMessage");
+    expect(calls.map((call) => call.method)).toContain("editMessageText");
+    expect(calls.find((call) => call.method === "editMessageText")?.payload).toMatchObject({
+      text: expect.stringContaining("Скачивание запущено: 0 КБ / ~0.1 КБ"),
+    });
+    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("progress");
+    expect(lookup.status === "found" ? lookup.session.activeJobId : undefined).toBe("job-1");
+    expect(onFormatSelected).toHaveBeenCalledWith(
+      expect.objectContaining({
+        formatValue: enabledOption.value,
+        option: enabledOption,
+      }),
+    );
+  });
+
+  it("terminally cancels progress without redrawing a selectable menu", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 15,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption, webmOption, m4aOption],
+    });
+    store.markProgress({ chatId: "123", messageId: 15 }, { activeJobId: "job-1", expectedSizeBytes: 100 });
+    const onCancel = vi.fn(async ({ ctx }) => {
+      await ctx.editMessageText("Отменено.", { reply_markup: { inline_keyboard: [] } });
+      store.delete({ chatId: "123", messageId: 15 });
+      return { accepted: true as const, jobId: "job-1" };
+    });
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel,
+    });
+
+    const rootMarkup = await menus.renderRootMenuMarkup("123", 15);
+
+    expect(rootMarkup.inline_keyboard.flat().map((button) => button.text)).toEqual(["Назад", "Отмена"]);
+
+    const cancelCalls = await invokeRootButton(menus, "123", 15, "Отмена");
+    const afterCancel = store.get({ chatId: "123", messageId: 15 });
+    const editCalls = cancelCalls.filter((call) => call.method === "editMessageText");
+    expect(cancelCalls.map((call) => call.method)).toContain("answerCallbackQuery");
+    expect(editCalls).toHaveLength(1);
+    expect(editCalls[0]?.payload).toMatchObject({
+      text: "Отменено.",
+      reply_markup: { inline_keyboard: [] },
+    });
+    expect(JSON.stringify(editCalls[0]?.payload)).not.toContain("Выберите формат");
+    expect(afterCancel.status).toBe("missing");
+    expect(onCancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ activeJobId: "job-1", state: "progress" }),
+      }),
+    );
+  });
+
+  it("back during progress keeps the active job and progress menu in place", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 16,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption, webmOption, m4aOption],
+    });
+    store.update({ chatId: "123", messageId: 16 }, { state: "quality", selectedContainer: "webm" });
+    expect(store.tryMarkStarting({ chatId: "123", messageId: 16 }, { expectedSizeBytes: 100 }).status).toBe("started");
+    store.markProgress({ chatId: "123", messageId: 16 }, { activeJobId: "job-1", expectedSizeBytes: 100 });
+    const onCancel = vi.fn(async () => undefined);
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel,
+    });
+
+    const calls = await invokeRootButton(menus, "123", 16, "Назад");
+    const lookup = store.get({ chatId: "123", messageId: 16 });
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.method)).toEqual(["answerCallbackQuery"]);
+    expect(calls[0]?.payload).toMatchObject({ text: "Задача выполняется." });
+    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("progress");
+    expect(lookup.status === "found" ? lookup.session.selectedContainer : undefined).toBe("webm");
+    expect(lookup.status === "found" ? lookup.session.activeJobId : undefined).toBe("job-1");
+  });
+
+  it("does not create a second job from stale root callbacks after progress starts", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 17,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption, webmOption],
+    });
+    const onFormatSelected = vi.fn(async () => ({ jobId: "job-1" }));
+    const onCancel = vi.fn(async () => undefined);
+    const menus = createDownloadMenus({ store, onFormatSelected, onCancel });
+    const rootMarkup = await menus.renderRootMenuMarkup("123", 17);
+    const staleButton = rootMarkup.inline_keyboard.flat().find((button) => button.text.includes("360p")) as
+      | { callback_data?: string }
+      | undefined;
+    if (!staleButton?.callback_data) throw new Error("missing stale callback data");
+
+    await invokeMenuCallback(menus, "123", 17, staleButton.callback_data);
+    await invokeMenuCallback(menus, "123", 17, staleButton.callback_data);
+
+    expect(onFormatSelected).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("renders no working cancel button while a menu session is sending", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 18,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption],
+    });
+    store.update({ chatId: "123", messageId: 18 }, { state: "sending", activeJobId: "job-1" });
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel: vi.fn(async () => undefined),
+    });
+
+    const markup = await menus.renderRootMenuMarkup("123", 18);
+
+    expect(markup.inline_keyboard.flat().map((button) => button.text)).not.toContain("Отмена");
+    expect(markup.inline_keyboard.flat().map((button) => button.text)).not.toContain("Назад");
+  });
+
+  it("does not clear or redraw progress when cancellation is refused during sending", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 19,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption],
+      requesterUserId: "1",
+    });
+    store.markProgress({ chatId: "123", messageId: 19 }, { activeJobId: "job-1", expectedSizeBytes: 100 });
+    const onCancel = vi.fn(async () => ({
+      accepted: false as const,
+      jobId: "job-1",
+      previousStatus: "sending" as const,
+      reason: "not_cancellable" as const,
+    }));
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel,
+    });
+
+    const calls = await invokeRootButton(menus, "123", 19, "Отмена");
+    const lookup = store.get({ chatId: "123", messageId: 19 });
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(calls.map((call) => call.method)).toEqual(["answerCallbackQuery"]);
+    expect(calls[0]?.payload).toMatchObject({ text: expect.stringContaining("Отправляю") });
+    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("sending");
+    expect(lookup.status === "found" ? lookup.session.activeJobId : undefined).toBe("job-1");
+  });
+
+  it("rejects state-changing progress callbacks from a different group user", async () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "-100123",
+      messageId: 20,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [enabledOption],
+      requesterUserId: "1",
+    });
+    store.markProgress({ chatId: "-100123", messageId: 20 }, { activeJobId: "job-1", expectedSizeBytes: 100 });
+    const onCancel = vi.fn(async () => ({ accepted: true as const, jobId: "job-1" }));
+    const menus = createDownloadMenus({
+      store,
+      onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
+      onCancel,
+    });
+
+    const calls = await invokeRootButton(menus, "-100123", 20, "Отмена", { fromId: 2, chatType: "group" });
+    const lookup = store.get({ chatId: "-100123", messageId: 20 });
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.method)).toEqual(["answerCallbackQuery"]);
+    expect(calls[0]?.payload).toMatchObject({ text: expect.stringContaining("автору запроса") });
+    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("progress");
+    expect(lookup.status === "found" ? lookup.session.activeJobId : undefined).toBe("job-1");
   });
 });
