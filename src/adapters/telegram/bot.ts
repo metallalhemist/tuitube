@@ -29,6 +29,9 @@ type TextMessageContext = Context & {
   chat: {
     id: number | string;
   };
+  from?: {
+    id: number | string;
+  };
 };
 
 export async function handleTelegramTextMessage(
@@ -44,12 +47,16 @@ export async function handleTelegramTextMessage(
   }
 
   await ctx.reply(telegramCopy.analyzingUrl);
-  logger.info("telegram.metadata_prepare.acknowledged", { hasChatId: Boolean(ctx.chat.id) });
+  const requesterUserId = ctx.from?.id === undefined ? undefined : String(ctx.from.id);
+  logger.info("telegram.metadata_prepare.acknowledged", {
+    hasChatId: Boolean(ctx.chat.id),
+    hasRequesterUserId: Boolean(requesterUserId),
+  });
 
   try {
     const job = await jobService.createMediaJob({
       action: "prepare_metadata",
-      payload: { url: text },
+      payload: { url: text, requesterUserId },
       chatId: String(ctx.chat.id),
     });
     logger.info("telegram.metadata_prepare.enqueued", { jobId: job.id, action: job.action, hasChatId: true });

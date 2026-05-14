@@ -37,6 +37,7 @@ src/
 │   ├── validation.ts                 # Pure URL/time/live-stream checks
 │   ├── sanitize.ts                   # Pure filename/title sanitization
 │   ├── logger.ts                     # Backend-safe logger contract
+│   ├── download-progress.ts          # Core-safe progress model and yt-dlp progress parsing
 │   ├── types.ts                      # Shared serializable core types
 │   └── errors.ts                     # Typed reusable errors and error codes
 ├── integrations/
@@ -49,12 +50,17 @@ src/
 │       ├── bot.ts                    # grammY bot setup and queue/menu handoff
 │       ├── copy.ts                   # Russian Telegram copy and labels
 │       ├── menu-session-store.ts     # In-memory menu sessions with TTL
+│       ├── download-progress-dispatcher.ts # Throttled progress edits for active menu jobs
+│       ├── progress-cleanup.ts       # Terminal progress cleanup/session deletion contract
+│       ├── progress-message.ts       # Shared progress and terminal message rendering
+│       ├── telegram-error.ts         # Telegram API error sanitization helpers
 │       ├── metadata-result-dispatcher.ts # Sends prepared menu messages
 │       ├── result-sender.ts          # Sends completed media/transcript results
 │       └── menus/                    # @grammyjs/menu UI adapter
 ├── server/
 │   ├── config.ts                     # Environment parsing and defaults
 │   ├── app.ts                        # Fastify instance and route registration
+│   ├── telegram-runtime.ts           # Side-effect-light Telegram progress composition
 │   ├── lifecycle.ts                  # Signal shutdown handling
 │   └── index.ts                      # Backend process entrypoint
 ├── tools/                            # Existing Termcast AI tools
@@ -234,6 +240,10 @@ The Telegram menu UI should be an adapter concern:
 ```text
 adapters/telegram/
 ├── menu-session-store.ts   # chat id + message id keyed in-memory sessions
+├── download-progress-dispatcher.ts # worker progress -> throttled original-message edits
+├── progress-cleanup.ts     # terminal progress cleanup and session deletion
+├── progress-message.ts     # shared progress/terminal message rendering
+├── telegram-error.ts       # Telegram API error sanitization
 ├── metadata-result-dispatcher.ts # background metadata result -> menu message
 ├── result-sender.ts        # completed media/transcript -> Telegram messages
 └── menus/

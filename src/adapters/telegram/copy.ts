@@ -21,6 +21,13 @@ export function formatTelegramBytes(bytes: number | undefined): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} ГиБ`;
 }
 
+export function formatTelegramProgressBytes(bytes: number | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return "0 КБ";
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} КБ`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} МБ`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} ГБ`;
+}
+
 function formatTelegramBytesIfKnown(bytes: number | undefined): string | undefined {
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) return undefined;
   return formatTelegramBytes(bytes);
@@ -44,6 +51,7 @@ export const telegramCopy = {
   queueAccepted: (jobId: string) => `Задача принята в очередь. ID: ${jobId}`,
   queueFull: "Очередь сейчас заполнена. Попробуйте позже.",
   running: "Задача выполняется.",
+  unauthorizedCallback: "Эта кнопка доступна только автору запроса.",
   completed: "Готово.",
   failed: "Не удалось выполнить задачу. Попробуйте позже.",
   cancelled: "Отменено.",
@@ -51,6 +59,9 @@ export const telegramCopy = {
   callbackAccepted: "Принято.",
   callbackDisabled: "Этот вариант недоступен.",
   downloadStarted: "Скачивание запущено.",
+  downloadProgress: (downloaded: string, total: string) => `Скачивание запущено: ${downloaded} / ${total}`,
+  progressUnknownTotal: "размер неизвестен",
+  sendingFile: "Файл готов. Отправляю в Telegram...",
   transcriptStarted: "Извлечение расшифровки запущено.",
   sendingFileFailed: "Файл подготовлен, но отправить его в Telegram не удалось.",
   telegramUploadTooLarge: (limitLabel: string, mode: "cloud" | "local") =>

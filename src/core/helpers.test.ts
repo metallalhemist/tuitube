@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildDownloadPlans,
   buildSerializableFormatOptions,
@@ -23,12 +23,15 @@ import { isValidUrl } from "./validation.js";
 import { createTempJobDirectory } from "./jobs/temp-job.js";
 import type { Format, Video } from "./types.js";
 import { downloadFormatArgs, fetchVideoMetadata, parsePrintedFilePath } from "../integrations/yt-dlp.js";
+import { parseYtDlpDownloadProgress } from "../integrations/yt-dlp.js";
+import { YTDLP_PROGRESS_PREFIX } from "./download-progress.js";
 import { resolvePublicAddress } from "../integrations/egress-proxy.js";
 import {
   mapProcessFailure,
   processFailureToError,
   redactCommandOutput,
   runBufferedCommand,
+  runStreamingCommand,
 } from "../integrations/process.js";
 
 const audio: Format = {
@@ -382,5 +385,95 @@ Hello world
         process.env.TELEGRAM_WEBHOOK_SECRET = originalWebhookSecret;
       }
     }
+  });
+
+  it("parses structured yt-dlp progress and ignores unrelated lines", () => {
+    expect(
+      parseYtDlpDownloadProgress(`${YTDLP_PROGRESS_PREFIX}\tdownloading\t1048576\t2097152\tNA\t50.0%`),
+    ).toMatchObject({
+      status: "downloading",
+      downloadedBytes: 1048576,
+      totalBytes: 2097152,
+      percent: 50,
+    });
+    expect(parseYtDlpDownloadProgress(`${YTDLP_PROGRESS_PREFIX}\tdownloading\tNA\tNA\t3145728\t101.5%`)).toMatchObject({
+      totalBytesEstimate: 3145728,
+      percent: 100,
+    });
+    expect(parseYtDlpDownloadProgress("[download]  37.5% of 10.00MiB")).toMatchObject({
+      percent: 37.5,
+      totalBytes: 10 * 1024 ** 2,
+    });
+    expect(parseYtDlpDownloadProgress("not progress")).toBeUndefined();
+  });
+
+  it("keeps printed file path parsing when progress-template lines are present", () => {
+    const stdout = [`${YTDLP_PROGRESS_PREFIX}\tdownloading\t1\t2\tNA\t50%`, "noise", "/tmp/video.mp4"].join("\n");
+
+    expect(parsePrintedFilePath(stdout)).toBe("/tmp/video.mp4");
+  });
+
+  it("streams complete stdout and stderr lines without losing accumulated output", async () => {
+    const stdoutLines: string[] = [];
+    const stderrLines: string[] = [];
+    const script = `
+      process.stdout.write("one\\npartial");
+      process.stderr.write("err\\n");
+      setTimeout(() => {
+        process.stdout.write(" done\\ntrail");
+      }, 5);
+    `;
+
+    const result = await runStreamingCommand({
+      executablePath: process.execPath,
+      args: ["-e", script],
+      timeoutMs: 1000,
+      maxBufferBytes: 1024 * 1024,
+      onStdoutLine: (line) => stdoutLines.push(line),
+      onStderrLine: (line) => stderrLines.push(line),
+    });
+
+    expect(stdoutLines).toEqual(["one", "partial done", "trail"]);
+    expect(stderrLines).toEqual(["err"]);
+    expect(result.stdout).toContain("partial done");
+    expect(result.stderr).toContain("err");
+  });
+
+  it("swallows stream observer failures without hiding process failures", async () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    await runStreamingCommand({
+      executablePath: process.execPath,
+      args: ["-e", "console.log('line')"],
+      timeoutMs: 1000,
+      maxBufferBytes: 1024 * 1024,
+      logger,
+      onStdoutLine: () => {
+        throw new Error("observer failed");
+      },
+    });
+    expect(logger.debug).toHaveBeenCalledWith("process.streaming.observer_failed", {
+      phase: "command",
+      stream: "stdout",
+      error: "observer failed",
+    });
+
+    await expect(
+      runStreamingCommand({
+        executablePath: process.execPath,
+        args: ["-e", "console.log('line'); process.exit(12)"],
+        timeoutMs: 1000,
+        maxBufferBytes: 1024 * 1024,
+        logger,
+        onStdoutLine: () => {
+          throw new Error("observer failed again");
+        },
+      }),
+    ).rejects.toMatchObject({ code: "PROCESS_FAILED" });
   });
 });

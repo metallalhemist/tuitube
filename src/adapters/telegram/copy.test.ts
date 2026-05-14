@@ -3,6 +3,7 @@ import type { SerializableFormatOption } from "../../core/types.js";
 import {
   audioFormatButtonLabel,
   formatOptionButtonLabel,
+  formatTelegramProgressBytes,
   formatTelegramBytes,
   jobFailedText,
   telegramCopy,
@@ -92,6 +93,13 @@ describe("telegram copy and display policy", () => {
     expect(audioFormatButtonLabel(option({ value: "251#webm", extension: "webm", container: "webm" }))).toBe(
       "WEBM Audio",
     );
+  });
+
+  it("formats progress bytes with KB, MB, and GB labels without changing menu byte labels", () => {
+    expect(formatTelegramProgressBytes(512)).toBe("0.5 КБ");
+    expect(formatTelegramProgressBytes(2 * 1024 ** 2)).toBe("2.0 МБ");
+    expect(formatTelegramProgressBytes(3 * 1024 ** 3)).toBe("3.00 ГБ");
+    expect(formatTelegramBytes(2 * 1024 ** 2)).toBe("2.0 МиБ");
   });
 
   it("chooses transcript document fallback for long transcripts", () => {

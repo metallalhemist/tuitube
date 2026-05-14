@@ -83,6 +83,7 @@ export class TelegramMetadataResultDispatcher {
         chatId: job.chatId,
         messageId: sentMessage.message_id,
         url: job.payload.url,
+        requesterUserId: job.payload.requesterUserId,
         title: snapshot.title,
         duration: snapshot.duration,
         formatOptions: snapshot.formatOptions,
@@ -96,6 +97,7 @@ export class TelegramMetadataResultDispatcher {
       this.logger.info("telegram.metadata_dispatch.finish", {
         jobId: job.id,
         messageId: sentMessage.message_id,
+        hasRequesterUserId: Boolean(job.payload.requesterUserId),
       });
     } catch (error) {
       this.logger.error("telegram.metadata_dispatch.failed", {

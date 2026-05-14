@@ -15,7 +15,16 @@ export type CreateMediaJobInput = {
   chatId?: string;
 };
 
+export type CancelJobResult = {
+  job?: MediaJob;
+  previousStatus?: JobStatus;
+  cancelled: boolean;
+  removedFromQueue: boolean;
+  wasTerminal: boolean;
+};
+
 const terminalStatuses = new Set<JobStatus>(["completed", "failed", "cancelled"]);
+const nonCancellableStatuses = new Set<JobStatus>(["sending", "completed", "failed", "cancelled"]);
 
 export class JobService {
   private readonly jobs = new Map<string, MediaJob>();
@@ -115,14 +124,40 @@ export class JobService {
     });
   }
 
-  cancelJob(jobId: string): MediaJob | undefined {
+  cancelJob(jobId: string): CancelJobResult {
+    const existing = this.jobs.get(jobId);
     const removedFromQueue = this.queue.cancel(jobId);
-    this.logger.info("job_service.cancel", { jobId, removedFromQueue });
-    return this.updateJob(jobId, "cancelled", {
+    const wasTerminal = existing ? terminalStatuses.has(existing.status) : false;
+    const canCancel = existing ? !nonCancellableStatuses.has(existing.status) : false;
+    this.logger.info("job_service.cancel", {
+      jobId,
+      removedFromQueue,
+      previousStatus: existing?.status,
+      wasTerminal,
+      canCancel,
+    });
+    if (!existing || !canCancel) {
+      return {
+        job: existing,
+        previousStatus: existing?.status,
+        cancelled: Boolean(existing && existing.status === "cancelled"),
+        removedFromQueue,
+        wasTerminal,
+      };
+    }
+
+    const job = this.updateJob(jobId, "cancelled", {
       completedAt: new Date(),
       errorCode: "JOB_CANCELLED",
       errorMessage: "Job was cancelled",
     });
+    return {
+      job,
+      previousStatus: existing.status,
+      cancelled: job?.status === "cancelled",
+      removedFromQueue,
+      wasTerminal: false,
+    };
   }
 
   stopAccepting(): void {

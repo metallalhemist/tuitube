@@ -1,10 +1,12 @@
 import { noopLogger, type Logger } from "../logger.js";
 import { MP3_FORMAT_ID } from "../format-selection.js";
+import type { DownloadProgress, DownloadProgressSource } from "../download-progress.js";
+import { parseYtDlpDownloadProgress } from "../download-progress.js";
 import type { VideoDownloadService } from "../services/video-download-service.js";
 import type { TranscriptResult, TranscriptService } from "../services/transcript-service.js";
 import type { DownloadResult, VideoSelectionSnapshot } from "../types.js";
 import type { MediaJob, JobQueue } from "./queue.js";
-import { JobService } from "./job-service.js";
+import { JobService, type CancelJobResult } from "./job-service.js";
 
 export type DownloadWorkerOptions = {
   queue: JobQueue<MediaJob>;
@@ -14,6 +16,8 @@ export type DownloadWorkerOptions = {
   maxConcurrency?: number;
   logger?: Logger;
   onMetadataPrepared?: (job: MediaJob, snapshot: VideoSelectionSnapshot) => Promise<void>;
+  onJobProgress?: (job: MediaJob, progress: DownloadProgress) => Promise<void> | void;
+  onJobSending?: (job: MediaJob) => Promise<void> | void;
   onJobCompleted?: (job: MediaJob, result: DownloadResult) => Promise<void>;
   onTranscriptCompleted?: (job: MediaJob, result: TranscriptResult) => Promise<void>;
   onJobFailed?: (job: MediaJob, error: unknown) => Promise<void>;
@@ -32,6 +36,8 @@ export class DownloadWorker {
   private readonly maxConcurrency: number;
   private readonly logger: Logger;
   private readonly onMetadataPrepared?: (job: MediaJob, snapshot: VideoSelectionSnapshot) => Promise<void>;
+  private readonly onJobProgress?: (job: MediaJob, progress: DownloadProgress) => Promise<void> | void;
+  private readonly onJobSending?: (job: MediaJob) => Promise<void> | void;
   private readonly onJobCompleted?: (job: MediaJob, result: DownloadResult) => Promise<void>;
   private readonly onTranscriptCompleted?: (job: MediaJob, result: TranscriptResult) => Promise<void>;
   private readonly onJobFailed?: (job: MediaJob, error: unknown) => Promise<void>;
@@ -48,6 +54,8 @@ export class DownloadWorker {
     this.maxConcurrency = options.maxConcurrency ?? 1;
     this.logger = options.logger ?? noopLogger;
     this.onMetadataPrepared = options.onMetadataPrepared;
+    this.onJobProgress = options.onJobProgress;
+    this.onJobSending = options.onJobSending;
     this.onJobCompleted = options.onJobCompleted;
     this.onTranscriptCompleted = options.onTranscriptCompleted;
     this.onJobFailed = options.onJobFailed;
@@ -109,12 +117,56 @@ export class DownloadWorker {
             this.logger.warn("download_worker.compatibility_action", { jobId: job.id, action: job.action });
           }
           this.logger.info("download_worker.dispatch", { jobId: job.id, action: job.action });
+          const onStdoutLine = this.createProgressLineObserver(job, "stdout");
+          const onStderrLine = this.createProgressLineObserver(job, "stderr");
           result = await this.downloadService.download({
             url: job.payload.url,
             formatValue: job.action === "extract_mp3" ? MP3_FORMAT_ID : job.payload.formatValue,
             cancelSignal: controller.signal,
+            onStdoutLine,
+            onStderrLine,
           });
-          await this.onJobCompleted?.(job, result);
+
+          const currentBeforeSending = this.jobService.getJob(job.id);
+          if (!currentBeforeSending || currentBeforeSending.status === "cancelled") {
+            this.logger.warn("download_worker.job.skip_sending_cancelled", {
+              jobId: job.id,
+              action: job.action,
+              status: currentBeforeSending?.status,
+            });
+            break;
+          }
+
+          const sendingJob = this.jobService.updateJob(job.id, "sending");
+          if (!sendingJob || sendingJob.status !== "sending") {
+            this.logger.warn("download_worker.job.skip_sending_status", {
+              jobId: job.id,
+              action: job.action,
+              status: sendingJob?.status,
+            });
+            break;
+          }
+
+          await this.notifyJobSending(sendingJob);
+          if (this.jobService.getJob(job.id)?.status !== "sending") {
+            this.logger.warn("download_worker.job.skip_completed_callback_status", {
+              jobId: job.id,
+              action: job.action,
+              status: this.jobService.getJob(job.id)?.status,
+            });
+            break;
+          }
+
+          await this.onJobCompleted?.(sendingJob, result);
+          if (this.jobService.getJob(job.id)?.status !== "sending") {
+            this.logger.warn("download_worker.job.skip_completed_update_status", {
+              jobId: job.id,
+              action: job.action,
+              status: this.jobService.getJob(job.id)?.status,
+            });
+            break;
+          }
+
           this.jobService.updateJob(job.id, "completed", {
             completedAt: new Date(),
             result: {
@@ -182,10 +234,59 @@ export class DownloadWorker {
     }
   }
 
-  cancel(jobId: string): void {
-    this.logger.info("download_worker.cancel", { jobId });
-    this.activeControllers.get(jobId)?.abort();
-    this.jobService.cancelJob(jobId);
+  private async notifyJobSending(job: MediaJob): Promise<void> {
+    try {
+      await this.onJobSending?.(job);
+    } catch (error) {
+      this.logger.warn("download_worker.job.sending_callback_failed", {
+        jobId: job.id,
+        action: job.action,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private createProgressLineObserver(job: MediaJob, source: DownloadProgressSource): (line: string) => void {
+    return (line) => {
+      const parsed = parseYtDlpDownloadProgress(line);
+      if (!parsed) return;
+      const progress: DownloadProgress = { ...parsed, source };
+      this.logger.debug("download_worker.progress.emit", {
+        jobId: job.id,
+        action: job.action,
+        percent: progress.percent,
+        downloadedBytes: progress.downloadedBytes,
+        totalBytes: progress.totalBytes,
+        totalBytesEstimate: progress.totalBytesEstimate,
+        source,
+      });
+      void Promise.resolve(this.onJobProgress?.(job, progress)).catch((error: unknown) => {
+        this.logger.warn("download_worker.progress.callback_failed", {
+          jobId: job.id,
+          action: job.action,
+          percent: progress.percent,
+          downloadedBytes: progress.downloadedBytes,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    };
+  }
+
+  cancel(jobId: string): CancelJobResult & { abortedActive: boolean } {
+    const currentStatus = this.jobService.getJob(jobId)?.status;
+    const controller = currentStatus === "running" ? this.activeControllers.get(jobId) : undefined;
+    const abortedActive = Boolean(controller);
+    this.logger.info("download_worker.cancel", { jobId, currentStatus, abortedActive });
+    controller?.abort();
+    const result = this.jobService.cancelJob(jobId);
+    this.logger.debug("download_worker.cancel.result", {
+      jobId,
+      abortedActive,
+      removedFromQueue: result.removedFromQueue,
+      previousStatus: result.previousStatus,
+      cancelled: result.cancelled,
+    });
+    return { ...result, abortedActive };
   }
 
   async stop({ timeoutMs, cancelRunning = true }: StopWorkerOptions): Promise<void> {

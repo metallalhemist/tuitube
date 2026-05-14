@@ -1,7 +1,7 @@
 import type { TranscriptResult } from "../services/transcript-service.js";
 import type { DownloadResult, VideoSelectionSnapshot } from "../types.js";
 
-export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "queued" | "running" | "sending" | "completed" | "failed" | "cancelled";
 
 export type MediaJobAction =
   | "prepare_metadata"
@@ -16,7 +16,9 @@ export type MediaJobPayload = {
   url: string;
   formatValue?: string;
   language?: string;
+  requesterUserId?: string;
   menuMessageId?: number;
+  expectedSizeBytes?: number;
 };
 
 export type MediaJobResult =

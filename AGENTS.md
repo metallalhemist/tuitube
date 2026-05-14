@@ -47,13 +47,19 @@ Tuitube is a Termcast extension and Telegram backend foundation for downloading 
 | `src/transcript.ts`                           | Subtitle download, conversion, parsing, cleanup, and temporary-file cleanup.              |
 | `src/core/services/video-download-service.ts` | Reusable metadata, policy, format, temp-dir, and download orchestration.                  |
 | `src/core/services/transcript-service.ts`     | Reusable transcript extraction and temporary subtitle cleanup.                            |
+| `src/core/download-progress.ts`               | Core-safe download progress type, yt-dlp progress-template constant, and progress parser. |
 | `src/core/jobs/job-service.ts`                | In-memory job creation and state tracking boundary.                                       |
 | `src/server/config.ts`                        | Central backend environment parsing and validation.                                       |
 | `src/server/app.ts`                           | Side-effect-light Fastify app factory for health and Telegram webhook routes.             |
 | `src/server/index.ts`                         | Backend process entrypoint for startup, webhook registration, and shutdown.               |
+| `src/server/telegram-runtime.ts`              | Side-effect-light Telegram progress dispatcher and cleanup composition.                   |
 | `src/adapters/telegram/bot.ts`                | Minimal grammY bot wiring and queue handoff.                                              |
 | `src/adapters/telegram/menus/download-menu.ts`| Telegram root menu for best video, quality, MP3, transcript, and cancellation actions.     |
 | `src/adapters/telegram/menu-session-store.ts` | In-memory Telegram menu session storage with 15 minute TTL.                               |
+| `src/adapters/telegram/download-progress-dispatcher.ts` | Throttles Telegram progress edits for active menu download jobs.            |
+| `src/adapters/telegram/progress-cleanup.ts`   | Terminal progress-message cleanup and menu-session deletion contract.                     |
+| `src/adapters/telegram/progress-message.ts`   | Shared Telegram progress and terminal message renderer.                                  |
+| `src/adapters/telegram/telegram-error.ts`     | Shared Telegram API error status, reason, and redaction helpers.                         |
 | `src/adapters/telegram/metadata-result-dispatcher.ts` | Sends prepared metadata menus after background snapshot jobs complete.          |
 | `src/adapters/telegram/result-sender.ts`      | Sends completed media/transcript results back to Telegram and cleans temporary documents.  |
 | `src/utils.ts`                                | Shared executable lookup, URL/time validation, format formatting, and title sanitization. |

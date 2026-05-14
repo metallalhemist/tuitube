@@ -46,12 +46,18 @@ function createApi(
     sendDocument: ReturnType<typeof vi.fn>;
     sendVideo: ReturnType<typeof vi.fn>;
     sendMessage: ReturnType<typeof vi.fn>;
+    editMessageMedia: ReturnType<typeof vi.fn>;
+    editMessageReplyMarkup: ReturnType<typeof vi.fn>;
+    editMessageText: ReturnType<typeof vi.fn>;
   }> = {},
 ) {
   return {
     sendDocument: vi.fn(async () => undefined),
     sendVideo: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => undefined),
+    editMessageMedia: vi.fn(async () => undefined),
+    editMessageReplyMarkup: vi.fn(async () => undefined),
+    editMessageText: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -103,6 +109,75 @@ describe("TelegramResultSender", () => {
       caption: expect.stringContaining("Готово"),
     });
     expect(api.sendVideo).not.toHaveBeenCalled();
+  });
+
+  it("edits the original progress message for MP4 menu jobs and clears stale markup", async () => {
+    const api = createApi();
+    const progressHooks = {
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => false),
+    };
+    const sender = new TelegramResultSender({ api, progressHooks });
+    const menuJob = {
+      ...job,
+      payload: { ...job.payload, menuMessageId: 77 },
+    };
+
+    await withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(menuJob, download));
+
+    expect(api.editMessageMedia).toHaveBeenCalledWith(
+      "123",
+      77,
+      expect.objectContaining({ type: "video", caption: expect.stringContaining("Готово") }),
+    );
+    expect(api.editMessageReplyMarkup).toHaveBeenCalledWith("123", 77);
+    expect(api.sendVideo).not.toHaveBeenCalled();
+    expect(progressHooks.markCompleted).toHaveBeenCalledWith(menuJob, { editOriginalMessage: false });
+  });
+
+  it("falls back to sending video when edit-media fails and marks original message completed", async () => {
+    const api = createApi({
+      editMessageMedia: vi.fn(async () => {
+        throw new Error("message cannot be edited");
+      }),
+    });
+    const progressHooks = {
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => false),
+    };
+    const sender = new TelegramResultSender({ api, progressHooks });
+    const menuJob = {
+      ...job,
+      payload: { ...job.payload, menuMessageId: 77 },
+    };
+
+    await withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(menuJob, download));
+
+    expect(api.sendVideo).toHaveBeenCalledTimes(1);
+    expect(progressHooks.markCompleted).toHaveBeenCalledWith(menuJob, { editOriginalMessage: true });
+  });
+
+  it("does not send a duplicate video when only edit-media markup cleanup fails", async () => {
+    const api = createApi({
+      editMessageReplyMarkup: vi.fn(async () => {
+        throw new Error("cannot clear markup");
+      }),
+    });
+    const progressHooks = {
+      markCompleted: vi.fn(async () => undefined),
+      markFailed: vi.fn(async () => false),
+    };
+    const sender = new TelegramResultSender({ api, progressHooks });
+    const menuJob = {
+      ...job,
+      payload: { ...job.payload, menuMessageId: 77 },
+    };
+
+    await withDownloadFile("video.mp4", 1024, (download) => sender.sendDownload(menuJob, download));
+
+    expect(api.editMessageMedia).toHaveBeenCalledTimes(1);
+    expect(api.sendVideo).not.toHaveBeenCalled();
+    expect(progressHooks.markCompleted).toHaveBeenCalledWith(menuJob, { editOriginalMessage: false });
   });
 
   it("rejects files above cloud upload limits before uploading", async () => {

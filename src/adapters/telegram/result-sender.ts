@@ -1,7 +1,7 @@
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { InputFile } from "grammy";
+import { InputFile, InputMediaBuilder } from "grammy";
 import { noopLogger, type Logger } from "../../core/logger.js";
 import type { MediaJob } from "../../core/jobs/queue.js";
 import type { TranscriptResult } from "../../core/services/transcript-service.js";
@@ -15,6 +15,12 @@ import {
   TELEGRAM_LOCAL_UPLOAD_LIMIT_BYTES,
   type TelegramUploadPolicy,
 } from "./upload-limits.js";
+import {
+  sanitizeTelegramError,
+  telegramErrorReasonCode,
+  telegramErrorStatusCode,
+  telegramErrorText,
+} from "./telegram-error.js";
 
 export type TelegramResultApi = {
   sendDocument(chatId: string, file: unknown, options?: { caption?: string }): Promise<unknown>;
@@ -24,6 +30,28 @@ export type TelegramResultApi = {
     options?: { caption?: string; supports_streaming?: boolean },
   ): Promise<unknown>;
   sendMessage(chatId: string, text: string): Promise<unknown>;
+  editMessageMedia?(
+    chatId: string,
+    messageId: number,
+    media: unknown,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+  editMessageReplyMarkup?(
+    chatId: string,
+    messageId: number,
+    options?: { reply_markup?: { inline_keyboard: import("grammy/types").InlineKeyboardButton[][] } },
+  ): Promise<unknown>;
+  editMessageText?(
+    chatId: string,
+    messageId: number,
+    text: string,
+    options?: { reply_markup?: { inline_keyboard: import("grammy/types").InlineKeyboardButton[][] } },
+  ): Promise<unknown>;
+};
+
+export type TelegramResultProgressHooks = {
+  markCompleted(job: MediaJob, options?: { editOriginalMessage?: boolean }): Promise<void>;
+  markFailed(job: MediaJob, text?: string): Promise<boolean>;
 };
 
 type TelegramUploadFailureReason = "http_413" | "request_entity_too_large" | "file_too_big";
@@ -33,6 +61,7 @@ export class TelegramResultSender {
     private readonly options: {
       api: TelegramResultApi;
       uploadPolicy?: TelegramUploadPolicy;
+      progressHooks?: TelegramResultProgressHooks;
       logger?: Logger;
     },
   ) {}
@@ -84,8 +113,8 @@ export class TelegramResultSender {
         sizeBucket: sizeBucket(fileSizeBytes),
         reason: "configured_limit",
       });
-      await this.notifyAlreadyAndThrow(
-        job.chatId,
+      await this.notifyDownloadFailure(
+        job,
         telegramCopy.telegramUploadTooLarge(uploadPolicy.limitLabel, uploadPolicy.mode),
         "Telegram upload limit exceeded before upload",
       );
@@ -94,6 +123,53 @@ export class TelegramResultSender {
     try {
       const file = new InputFile(result.filePath);
       const caption = `${telegramCopy.completed} ${result.title}`;
+      if (mediaKind === "video" && job.payload.menuMessageId && this.options.api.editMessageMedia) {
+        try {
+          this.logger.info("telegram.result_sender.edit_media.start", {
+            jobId: job.id,
+            mediaKind,
+            messageId: job.payload.menuMessageId,
+            uploadMode: uploadPolicy.mode,
+            sizeBucket: sizeBucket(fileSizeBytes),
+          });
+          await this.options.api.editMessageMedia(
+            job.chatId,
+            job.payload.menuMessageId,
+            InputMediaBuilder.video(file, { caption, supports_streaming: true }),
+          );
+          try {
+            await this.options.api.editMessageReplyMarkup?.(job.chatId, job.payload.menuMessageId);
+          } catch (error) {
+            this.logger.warn("telegram.result_sender.edit_media_markup_clear_failed", {
+              jobId: job.id,
+              mediaKind,
+              messageId: job.payload.menuMessageId,
+              statusCode: telegramErrorStatusCode(error),
+              reason: telegramErrorReasonCode(error),
+              error: sanitizeTelegramError(error),
+            });
+          }
+          await this.options.progressHooks?.markCompleted(job, { editOriginalMessage: false });
+          this.logger.info("telegram.result_sender.edit_media.finish", {
+            jobId: job.id,
+            mediaKind,
+            messageId: job.payload.menuMessageId,
+            uploadMode: uploadPolicy.mode,
+            sizeBucket: sizeBucket(fileSizeBytes),
+          });
+          return;
+        } catch (error) {
+          this.logger.warn("telegram.result_sender.edit_media_fallback", {
+            jobId: job.id,
+            mediaKind,
+            messageId: job.payload.menuMessageId,
+            statusCode: telegramErrorStatusCode(error),
+            reason: telegramErrorReasonCode(error),
+            error: sanitizeTelegramError(error),
+          });
+        }
+      }
+
       if (mediaKind === "video") {
         await this.options.api.sendVideo(job.chatId, file, {
           caption,
@@ -104,6 +180,7 @@ export class TelegramResultSender {
           caption,
         });
       }
+      await this.options.progressHooks?.markCompleted(job, { editOriginalMessage: Boolean(job.payload.menuMessageId) });
       this.logger.info("telegram.result_sender.download.finish", {
         jobId: job.id,
         action: job.action,
@@ -124,8 +201,8 @@ export class TelegramResultSender {
           reason: tooLargeReason,
           statusCode: telegramErrorStatusCode(error),
         });
-        await this.notifyAlreadyAndThrow(
-          job.chatId,
+        await this.notifyDownloadFailure(
+          job,
           telegramCopy.telegramUploadTooLarge(uploadPolicy.limitLabel, uploadPolicy.mode),
           "Telegram upload failed because the file is too large",
           error,
@@ -143,7 +220,7 @@ export class TelegramResultSender {
         reason: telegramErrorReasonCode(error),
         error: sanitizeTelegramError(error),
       });
-      await this.notifyAlreadyAndThrow(job.chatId, telegramCopy.sendingFileFailed, "Telegram upload failed", error);
+      await this.notifyDownloadFailure(job, telegramCopy.sendingFileFailed, "Telegram upload failed", error);
     }
   }
 
@@ -192,6 +269,7 @@ export class TelegramResultSender {
   async sendFailure(job: MediaJob): Promise<void> {
     if (!job.chatId) return;
     this.logger.warn("telegram.result_sender.failure", { jobId: job.id, action: job.action, code: job.errorCode });
+    if (await this.options.progressHooks?.markFailed(job, jobFailedText(job.errorCode))) return;
     try {
       await this.options.api.sendMessage(job.chatId, jobFailedText(job.errorCode));
     } catch (error) {
@@ -223,16 +301,25 @@ export class TelegramResultSender {
         reason: telegramErrorReasonCode(error),
         error: sanitizeTelegramError(error),
       });
-      if (job.chatId) {
-        await this.notifyAlreadyAndThrow(
-          job.chatId,
-          telegramCopy.sendingFileFailed,
-          "Could not inspect Telegram upload file",
-          error,
-        );
-      }
+      await this.notifyDownloadFailure(
+        job,
+        telegramCopy.sendingFileFailed,
+        "Could not inspect Telegram upload file",
+        error,
+      );
       throw error;
     }
+  }
+
+  private async notifyDownloadFailure(job: MediaJob, text: string, message: string, cause?: unknown): Promise<never> {
+    if (job.chatId && (await this.options.progressHooks?.markFailed(job, text))) {
+      throw new TelegramResultAlreadyNotifiedError(message, {
+        reason: cause ? telegramErrorReasonCode(cause) : undefined,
+      });
+    }
+
+    if (!job.chatId) throw new Error(message);
+    return await this.notifyAlreadyAndThrow(job.chatId, text, message, cause);
   }
 
   private async notifyAlreadyAndThrow(chatId: string, text: string, message: string, cause?: unknown): Promise<never> {
@@ -260,70 +347,6 @@ function sizeBucket(bytes: number): string {
   return "gt_local_limit";
 }
 
-function telegramErrorStatusCode(error: unknown): number | undefined {
-  const record = error as {
-    status?: unknown;
-    statusCode?: unknown;
-    error_code?: unknown;
-    response?: { status?: unknown; statusCode?: unknown; error_code?: unknown };
-  };
-  const candidates = [
-    record.status,
-    record.statusCode,
-    record.error_code,
-    record.response?.status,
-    record.response?.statusCode,
-    record.response?.error_code,
-  ];
-  return candidates.find(
-    (candidate): candidate is number => typeof candidate === "number" && Number.isFinite(candidate),
-  );
-}
-
-function telegramErrorText(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  const record = error as { description?: unknown; message?: unknown; response?: { description?: unknown } };
-  if (typeof record.description === "string") return record.description;
-  if (typeof record.response?.description === "string") return record.response.description;
-  if (typeof record.message === "string") return record.message;
-  return String(error);
-}
-
-function telegramErrorCode(error: unknown): string | undefined {
-  const record = error as {
-    code?: unknown;
-    errno?: unknown;
-    response?: { code?: unknown; errno?: unknown };
-  };
-  const candidates = [record.code, record.errno, record.response?.code, record.response?.errno];
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string") continue;
-    const normalized = candidate
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    if (normalized) return normalized.slice(0, 80);
-  }
-  return undefined;
-}
-
-function telegramErrorReasonCode(error: unknown): string {
-  const explicitCode = telegramErrorCode(error);
-  if (explicitCode) return explicitCode;
-
-  const statusCode = telegramErrorStatusCode(error);
-  if (statusCode) return `http_${statusCode}`;
-
-  const lowerText = telegramErrorText(error).toLowerCase();
-  if (lowerText.includes("enoent")) return "enoent";
-  if (lowerText.includes("eacces")) return "eacces";
-  if (lowerText.includes("request entity too large")) return "request_entity_too_large";
-  if (lowerText.includes("file is too big") || lowerText.includes("file too big")) return "file_too_big";
-  if (error instanceof Error) return "error";
-  return typeof error;
-}
-
 function classifyTelegramUploadTooLarge(error: unknown): TelegramUploadFailureReason | undefined {
   if (telegramErrorStatusCode(error) === 413) return "http_413";
 
@@ -331,24 +354,4 @@ function classifyTelegramUploadTooLarge(error: unknown): TelegramUploadFailureRe
   if (lowerText.includes("request entity too large")) return "request_entity_too_large";
   if (lowerText.includes("file is too big") || lowerText.includes("file too big")) return "file_too_big";
   return undefined;
-}
-
-function sanitizeTelegramError(error: unknown): string {
-  return redactSensitiveTelegramErrorText(telegramErrorText(error)).slice(0, 300);
-}
-
-function redactSensitiveTelegramErrorText(text: string): string {
-  const pathExtension = String.raw`(?:mp4|mkv|mov|webm|flv|m4a|aac|mp3|opus|ogg|wav|flac|weba|txt|srt|vtt)`;
-  const unquotedPathText = "[^\\r\\n\"'`<>]*?";
-  return text
-    .replace(new RegExp(String.raw`file://${unquotedPathText}\.${pathExtension}\b`, "gi"), "file://[path]")
-    .replace(/file:\/\/\S+/gi, "file://[path]")
-    .replace(/https?:\/\/\S+/g, "[url]")
-    .replace(/(["'`])(?:[A-Za-z]:[\\/]|\/)[^"'`\r\n]*\1/g, "$1[path]$1")
-    .replace(new RegExp(String.raw`\b[A-Za-z]:[\\/]${unquotedPathText}\.${pathExtension}\b`, "gi"), "[path]")
-    .replace(new RegExp(String.raw`(^|[\s(=:,])/${unquotedPathText}\.${pathExtension}\b`, "gi"), "$1[path]")
-    .replace(/\b[A-Za-z]:[\\/][^\s"'`<>]+/g, "[path]")
-    .replace(/(^|[\s(=:,])\/(?:[^/\s"'`<>]+\/)+[^/\s"'`<>]*/g, "$1[path]")
-    .replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot[redacted]")
-    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]");
 }

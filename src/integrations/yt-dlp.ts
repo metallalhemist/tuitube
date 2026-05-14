@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { downloadFailedError, TuitubeError } from "../core/errors.js";
 import { MP3_FORMAT_ID } from "../core/format-selection.js";
+import { YTDLP_PROGRESS_TEMPLATE, parseYtDlpDownloadProgress } from "../core/download-progress.js";
 import { noopLogger, type Logger } from "../core/logger.js";
 import type { CommandRuntimeOptions, Video } from "../core/types.js";
 import { assertValidUrl } from "../core/validation.js";
@@ -29,6 +30,8 @@ export type DownloadSubtitleCommand = YtDlpRuntimeOptions & {
   outputDirectory: string;
   language: string;
 };
+
+export { parseYtDlpDownloadProgress };
 
 function commonArgs(forceIpv4: boolean, proxyUrl: string): string[] {
   return ["--ignore-config", "--no-playlist", "--proxy", proxyUrl, ...(forceIpv4 ? ["--force-ipv4"] : [])];
@@ -147,6 +150,8 @@ export async function downloadVideo({
       ...commonArgs(forceIpv4, proxyUrl),
       ...(ffmpegPath ? ["--ffmpeg-location", ffmpegPath] : []),
       ...formatArgs,
+      "--progress-template",
+      YTDLP_PROGRESS_TEMPLATE,
       "--print",
       "after_move:filepath",
       "--newline",

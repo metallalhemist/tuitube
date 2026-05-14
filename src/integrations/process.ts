@@ -118,6 +118,31 @@ export function processFailureToError(failure: ProcessFailure): TuitubeError {
   });
 }
 
+function invokeLineObserver({
+  observer,
+  line,
+  logger,
+  phase,
+  stream,
+}: {
+  observer?: (line: string) => void;
+  line: string;
+  logger: Logger;
+  phase: string;
+  stream: "stdout" | "stderr";
+}): void {
+  if (!observer) return;
+  try {
+    observer(line);
+  } catch (error) {
+    logger.debug("process.streaming.observer_failed", {
+      phase,
+      stream,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function runBufferedCommand({
   executablePath,
   args,
@@ -210,7 +235,7 @@ export async function runStreamingCommand({
       stdout += text;
       const lines = (stdoutRemainder + text).split(/\r?\n/);
       stdoutRemainder = lines.pop() ?? "";
-      for (const line of lines) onStdoutLine?.(line);
+      for (const line of lines) invokeLineObserver({ observer: onStdoutLine, line, logger, phase, stream: "stdout" });
     });
 
     subprocess.stderr?.on("data", (chunk: Buffer) => {
@@ -218,12 +243,16 @@ export async function runStreamingCommand({
       stderr += text;
       const lines = (stderrRemainder + text).split(/\r?\n/);
       stderrRemainder = lines.pop() ?? "";
-      for (const line of lines) onStderrLine?.(line);
+      for (const line of lines) invokeLineObserver({ observer: onStderrLine, line, logger, phase, stream: "stderr" });
     });
 
     await subprocess;
-    if (stdoutRemainder) onStdoutLine?.(stdoutRemainder);
-    if (stderrRemainder) onStderrLine?.(stderrRemainder);
+    if (stdoutRemainder) {
+      invokeLineObserver({ observer: onStdoutLine, line: stdoutRemainder, logger, phase, stream: "stdout" });
+    }
+    if (stderrRemainder) {
+      invokeLineObserver({ observer: onStderrLine, line: stderrRemainder, logger, phase, stream: "stderr" });
+    }
     logger.debug("process.streaming.finish", { phase, stdoutBytes: stdout.length, stderrBytes: stderr.length });
     return { stdout, stderr };
   } catch (error) {

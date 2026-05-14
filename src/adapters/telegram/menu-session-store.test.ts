@@ -83,5 +83,49 @@ describe("TelegramMenuSessionStore", () => {
     });
     expect(telegramMenuSessionKeyFromMessage(undefined)).toBeUndefined();
   });
-});
 
+  it("guards duplicate starts and preserves active progress sessions past ttl", () => {
+    let now = 1_000;
+    const store = new TelegramMenuSessionStore({ ttlMs: 100, now: () => now });
+    store.create({
+      chatId: "123",
+      messageId: 10,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [option],
+    });
+
+    const first = store.tryMarkStarting({ chatId: "123", messageId: 10 }, { expectedSizeBytes: 100 });
+    expect(first.status).toBe("started");
+    const second = store.tryMarkStarting({ chatId: "123", messageId: 10 });
+    expect(second.status).toBe("busy");
+
+    store.markProgress({ chatId: "123", messageId: 10 }, { activeJobId: "job-1", expectedSizeBytes: 100 });
+    now = 2_000;
+
+    const lookup = store.get({ chatId: "123", messageId: 10 });
+    expect(lookup.status).toBe("found");
+    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("progress");
+    expect(store.pruneExpired(now)).toBe(0);
+  });
+
+  it("stores the selectable return state when marking a session as starting", () => {
+    const store = new TelegramMenuSessionStore();
+    store.create({
+      chatId: "123",
+      messageId: 10,
+      url: "https://example.com/video",
+      title: "Title",
+      duration: 30,
+      formatOptions: [option],
+    });
+    store.update({ chatId: "123", messageId: 10 }, { state: "quality", selectedContainer: "webm" });
+
+    const started = store.tryMarkStarting({ chatId: "123", messageId: 10 }, { expectedSizeBytes: 100 });
+
+    expect(started.status).toBe("started");
+    expect(started.status === "started" ? started.session.returnState : undefined).toBe("quality");
+    expect(started.status === "started" ? started.session.returnSelectedContainer : undefined).toBe("webm");
+  });
+});

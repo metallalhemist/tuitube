@@ -7,6 +7,7 @@ function createContext(text: string) {
   return {
     message: { text },
     chat: { id: 123 },
+    from: { id: 42 },
     reply: vi.fn(async () => undefined),
   };
 }
@@ -41,7 +42,9 @@ describe("telegram bot adapter", () => {
     await handleTelegramTextMessage(ctx as never, jobService);
 
     expect(ctx.reply).toHaveBeenCalledWith("Проверяю ссылку и готовлю варианты...");
-    expect(ctx.reply).toHaveBeenCalledWith("Не удалось подготовить варианты для этой ссылки. Попробуйте другую ссылку позже.");
+    expect(ctx.reply).toHaveBeenCalledWith(
+      "Не удалось подготовить варианты для этой ссылки. Попробуйте другую ссылку позже.",
+    );
   });
 
   it("rejects invalid URLs in Russian without enqueueing work", async () => {
@@ -56,5 +59,28 @@ describe("telegram bot adapter", () => {
       "Не похоже на поддерживаемую ссылку. Пришлите полный URL, начинающийся с http:// или https://.",
     );
     expect(jobService.createMediaJob).not.toHaveBeenCalled();
+  });
+
+  it("stores the requester id on metadata jobs for menu callback authorization", async () => {
+    const ctx = createContext("https://example.com/video");
+    const jobService = {
+      createMediaJob: vi.fn(async () => ({
+        id: "job-1",
+        action: "prepare_metadata",
+        payload: { url: "https://example.com/video" },
+        chatId: "123",
+        status: "queued",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })),
+    } as unknown as JobService;
+
+    await handleTelegramTextMessage(ctx as never, jobService);
+
+    expect(jobService.createMediaJob).toHaveBeenCalledWith({
+      action: "prepare_metadata",
+      payload: { url: "https://example.com/video", requesterUserId: "42" },
+      chatId: "123",
+    });
   });
 });

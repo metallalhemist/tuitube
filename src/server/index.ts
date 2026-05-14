@@ -7,7 +7,6 @@ import { VideoDownloadService } from "../core/services/video-download-service.js
 import { TranscriptService } from "../core/services/transcript-service.js";
 import { resolveExecutables } from "../integrations/executables.js";
 import { createTelegramBot } from "../adapters/telegram/bot.js";
-import { telegramCopy } from "../adapters/telegram/copy.js";
 import { createDownloadMenus } from "../adapters/telegram/menus/download-menu.js";
 import { TelegramMenuSessionStore } from "../adapters/telegram/menu-session-store.js";
 import { TelegramMetadataResultDispatcher } from "../adapters/telegram/metadata-result-dispatcher.js";
@@ -17,6 +16,7 @@ import { buildWebhookUrl, loadServerConfig, redactWebhookUrl } from "./config.js
 import { createServerApp } from "./app.js";
 import { installSignalHandlers } from "./lifecycle.js";
 import { registerTelegramWebhook } from "./webhook-registration.js";
+import { createTelegramProgressRuntime } from "./telegram-runtime.js";
 
 async function main(): Promise<void> {
   const config = loadServerConfig();
@@ -64,33 +64,71 @@ async function main(): Promise<void> {
   const jobService = new JobService(queue, logger);
   const menuSessionStore = new TelegramMenuSessionStore({ logger });
   const workerRef: { current?: DownloadWorker } = {};
+  let progressCleanup: ReturnType<typeof createTelegramProgressRuntime>["cleanup"] | undefined;
 
   const menus = createDownloadMenus({
     store: menuSessionStore,
     uploadPolicy: config.telegram.uploadPolicy,
     logger,
-    onFormatSelected: async ({ ctx, session, formatValue }) => {
-      await ctx.reply(telegramCopy.downloadStarted);
+    onFormatSelected: async ({ session, formatValue, option }) => {
       const job = await jobService.createMediaJob({
         action: "download_format",
-        payload: { url: session.url, formatValue },
+        payload: {
+          url: session.url,
+          formatValue,
+          requesterUserId: session.requesterUserId,
+          menuMessageId: session.messageId,
+          expectedSizeBytes: option.estimatedSizeBytes,
+        },
         chatId: session.chatId,
       });
-      await ctx.reply(telegramCopy.queueAccepted(job.id)).catch((error: unknown) => {
-        logger.warn("telegram.menu.format.queue_accept_reply_failed", {
-          jobId: job.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+      logger.info("telegram.menu.job_created", {
+        jobId: job.id,
+        action: job.action,
+        hasChatId: Boolean(job.chatId),
+        menuMessageId: session.messageId,
+        hasExpectedSizeBytes: typeof option.estimatedSizeBytes === "number",
+        hasRequesterUserId: Boolean(session.requesterUserId),
       });
       return { jobId: job.id };
     },
-    onCancel: async ({ ctx, session }) => {
+    onCancel: async ({ session }) => {
       if (session.activeJobId) {
         const worker = workerRef.current;
-        if (worker) worker.cancel(session.activeJobId);
-        else jobService.cancelJob(session.activeJobId);
+        const result = worker ? worker.cancel(session.activeJobId) : jobService.cancelJob(session.activeJobId);
+        logger.info("telegram.menu.cancel.accepted", {
+          jobId: session.activeJobId,
+          previousStatus: result.previousStatus,
+        });
+        logger.debug("telegram.menu.cancel.result", {
+          jobId: session.activeJobId,
+          removedFromQueue: result.removedFromQueue,
+          abortedActive: "abortedActive" in result ? result.abortedActive : false,
+          cancelled: result.cancelled,
+        });
+        const cancelledJob = result.job ?? jobService.getJob(session.activeJobId);
+        if (cancelledJob && result.cancelled) {
+          await progressCleanup?.markCancelled(cancelledJob);
+          return {
+            accepted: true as const,
+            jobId: session.activeJobId,
+            previousStatus: result.previousStatus,
+          };
+        } else {
+          logger.warn("telegram.menu.cancel.refused", {
+            jobId: session.activeJobId,
+            previousStatus: result.previousStatus,
+          });
+          return {
+            accepted: false as const,
+            jobId: session.activeJobId,
+            previousStatus: result.previousStatus,
+            reason: "not_cancellable" as const,
+          };
+        }
       }
-      await ctx.reply(telegramCopy.cancelled);
+      logger.warn("telegram.menu.cancel.missing_active_job");
+      return { accepted: false as const, reason: "missing_active_job" as const };
     },
   });
 
@@ -102,6 +140,14 @@ async function main(): Promise<void> {
     logger,
   });
 
+  const progressRuntime = createTelegramProgressRuntime({
+    api: bot.api,
+    store: menuSessionStore,
+    menus,
+    logger,
+  });
+  progressCleanup = progressRuntime.cleanup;
+
   const metadataDispatcher = new TelegramMetadataResultDispatcher({
     api: bot.api,
     store: menuSessionStore,
@@ -109,7 +155,12 @@ async function main(): Promise<void> {
     uploadPolicy: config.telegram.uploadPolicy,
     logger,
   });
-  const resultSender = new TelegramResultSender({ api: bot.api, uploadPolicy: config.telegram.uploadPolicy, logger });
+  const resultSender = new TelegramResultSender({
+    api: bot.api,
+    uploadPolicy: config.telegram.uploadPolicy,
+    progressHooks: progressRuntime.cleanup,
+    logger,
+  });
   const worker = new DownloadWorker({
     queue,
     jobService,
@@ -118,6 +169,10 @@ async function main(): Promise<void> {
     maxConcurrency: config.maxConcurrentDownloads,
     logger,
     onMetadataPrepared: async (job, snapshot) => metadataDispatcher.dispatchPrepared(job, snapshot),
+    onJobProgress: async (job, progress) => progressRuntime.onJobProgress(job, progress),
+    onJobSending: async (job) => {
+      await progressRuntime.cleanup.markSending(job);
+    },
     onJobCompleted: async (job, result) => resultSender.sendDownload(job, result),
     onTranscriptCompleted: async (job, result) => resultSender.sendTranscript(job, result),
     onJobFailed: async (job, error) => {
