@@ -8,3 +8,6 @@
 raycast-env.d.ts
 app.log
 dist
+
+# local server debug credentials
+server-data.local.md

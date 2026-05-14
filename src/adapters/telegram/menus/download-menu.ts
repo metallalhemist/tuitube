@@ -13,6 +13,7 @@ import type {
   TelegramMenuSession,
   TelegramMenuSessionKey,
   TelegramMenuSessionStore,
+  TelegramSelectableMenuState,
 } from "../menu-session-store.js";
 import { createInitialTelegramProgressView, renderTelegramDownloadProgressText } from "../progress-message.js";
 import { sanitizeTelegramError, telegramErrorReasonCode, telegramErrorStatusCode } from "../telegram-error.js";
@@ -44,6 +45,7 @@ export type RootMenuCancelResult =
 export type RootMenuCancelHandler = (input: {
   ctx: TelegramMenuContext;
   session: TelegramMenuSession;
+  preserveSession?: boolean;
 }) => Promise<RootMenuCancelResult | void>;
 
 export type DownloadMenus = {
@@ -84,6 +86,80 @@ export function createDownloadMenus({
   const qualityMenu = createFormatMenu({ store, onFormatSelected, uploadPolicy, logger });
   const audioMenu = createAudioMenu({ store, onFormatSelected, uploadPolicy, logger });
 
+  const hasAvailableRootMp4 = (session: TelegramMenuSession): boolean =>
+    getRootMp4FormatOptions(session.formatOptions).some((option) => {
+      const displayPolicy = telegramDisplayPolicyForOption(option, uploadPolicy);
+      return !option.disabled && !displayPolicy.disabled;
+    });
+
+  const menuForState = (state: TelegramSelectableMenuState): Menu<TelegramMenuContext> => {
+    switch (state) {
+      case "container":
+        return containerMenu;
+      case "quality":
+        return qualityMenu;
+      case "audio":
+        return audioMenu;
+      case "root":
+      default:
+        return rootMenu;
+    }
+  };
+
+  const restoreSelectableMenuAfterProgress = async (
+    callbackCtx: TelegramMenuContext,
+    key: TelegramMenuSessionKey,
+    session: TelegramMenuSession,
+  ): Promise<void> => {
+    const returnState = session.returnState ?? "root";
+    const restored = store.update(key, {
+      state: returnState,
+      selectedContainer: session.returnSelectedContainer,
+      activeJobId: undefined,
+      expectedSizeBytes: undefined,
+      returnState: undefined,
+      returnSelectedContainer: undefined,
+    });
+    if (restored.status !== "found") {
+      logger.warn("[FIX] telegram.menu.root.progress_back_restore_missing", {
+        jobId: session.activeJobId,
+        status: restored.status,
+      });
+      await callbackCtx.answerCallbackQuery(
+        restored.status === "expired" ? telegramCopy.expiredSession : telegramCopy.missingSession,
+      );
+      return;
+    }
+
+    const replyMarkup = await renderMenuMarkup(
+      menuForState(returnState),
+      createSyntheticMenuContext(key.chatId, key.messageId),
+    );
+    try {
+      logger.info("[FIX] telegram.menu.root.progress_back_restore", {
+        jobId: session.activeJobId,
+        returnState,
+        selectedContainer: restored.session.selectedContainer,
+      });
+      await callbackCtx.editMessageText(
+        telegramCopy.mainMenuTitle(restored.session.title, restored.session.duration, {
+          hasMp4WithoutRecoding: hasAvailableRootMp4(restored.session),
+        }),
+        { reply_markup: replyMarkup },
+      );
+      await callbackCtx.answerCallbackQuery(telegramCopy.cancelled);
+    } catch (error) {
+      logger.warn("[FIX] telegram.menu.root.progress_back_restore_failed", {
+        jobId: session.activeJobId,
+        returnState,
+        statusCode: telegramErrorStatusCode(error),
+        reason: telegramErrorReasonCode(error),
+        error: sanitizeTelegramError(error),
+      });
+      await callbackCtx.answerCallbackQuery(telegramCopy.failed);
+    }
+  };
+
   const interruptProgress = async (
     callbackCtx: TelegramMenuContext,
     key: TelegramMenuSessionKey,
@@ -102,7 +178,7 @@ export function createDownloadMenus({
 
     let cancelResult: RootMenuCancelResult | void;
     try {
-      cancelResult = await onCancel({ ctx: callbackCtx, session });
+      cancelResult = await onCancel({ ctx: callbackCtx, session, preserveSession: target === "return" });
     } catch (error) {
       const normalized = normalizeError(error);
       logger.warn("telegram.menu.root.progress_interrupt_cancel_failed", {
@@ -126,6 +202,11 @@ export function createDownloadMenus({
       await callbackCtx.answerCallbackQuery(
         cancelResult.previousStatus === "sending" ? telegramCopy.sendingFile : telegramCopy.running,
       );
+      return;
+    }
+
+    if (target === "return") {
+      await restoreSelectableMenuAfterProgress(callbackCtx, key, session);
       return;
     }
 
@@ -304,8 +385,8 @@ export function createDownloadMenus({
             return;
           }
 
-          logger.info("telegram.menu.root.progress_back", { jobId: current.session.activeJobId });
-          await callbackCtx.answerCallbackQuery(telegramCopy.running);
+          logger.info("[FIX] telegram.menu.root.progress_back_cancel", { jobId: current.session.activeJobId });
+          await interruptProgress(callbackCtx, lookup.key, current.session, "return");
         })
         .text(telegramButtons.cancel, async (callbackCtx) => {
           const current = store.get(lookup.key);

@@ -84,6 +84,12 @@ Tuitube is a Termcast extension and Telegram backend foundation for downloading 
 | `.ai-factory/ARCHITECTURE.md` | Architecture guidelines for future changes.                        |
 | `.ai-factory/rules/base.md`   | Auto-detected project coding conventions.                          |
 
+## Local Private Files
+
+| File                   | Purpose                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `server-data.local.md` | Git-ignored local file for server debug connection data such as IP and password. Read it for server debugging/deploy tasks, but never commit or print secrets from it. |
+
 ## Agent Rules
 
 - Keep shell commands decomposed when state changes matter.

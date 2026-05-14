@@ -427,7 +427,7 @@ describe("download menu", () => {
     );
   });
 
-  it("back during progress keeps the active job and progress menu in place", async () => {
+  it("back during progress cancels the active job and returns to the quality menu", async () => {
     const store = new TelegramMenuSessionStore();
     store.create({
       chatId: "123",
@@ -440,7 +440,7 @@ describe("download menu", () => {
     store.update({ chatId: "123", messageId: 16 }, { state: "quality", selectedContainer: "webm" });
     expect(store.tryMarkStarting({ chatId: "123", messageId: 16 }, { expectedSizeBytes: 100 }).status).toBe("started");
     store.markProgress({ chatId: "123", messageId: 16 }, { activeJobId: "job-1", expectedSizeBytes: 100 });
-    const onCancel = vi.fn(async () => undefined);
+    const onCancel = vi.fn(async () => ({ accepted: true as const, jobId: "job-1" }));
     const menus = createDownloadMenus({
       store,
       onFormatSelected: vi.fn(async () => ({ jobId: "job-2" })),
@@ -449,13 +449,24 @@ describe("download menu", () => {
 
     const calls = await invokeRootButton(menus, "123", 16, "Назад");
     const lookup = store.get({ chatId: "123", messageId: 16 });
+    const editCall = calls.find((call) => call.method === "editMessageText");
 
-    expect(onCancel).not.toHaveBeenCalled();
-    expect(calls.map((call) => call.method)).toEqual(["answerCallbackQuery"]);
-    expect(calls[0]?.payload).toMatchObject({ text: "Задача выполняется." });
-    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("progress");
+    expect(onCancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preserveSession: true,
+        session: expect.objectContaining({ activeJobId: "job-1", state: "progress" }),
+      }),
+    );
+    expect(calls.map((call) => call.method)).toEqual(["editMessageText", "answerCallbackQuery"]);
+    expect(editCall?.payload).toMatchObject({
+      text: expect.stringContaining("Выберите формат:"),
+    });
+    expect(JSON.stringify(editCall?.payload)).toContain("720p");
+    expect(calls.at(-1)?.payload).toMatchObject({ text: "Отменено." });
+    expect(lookup.status === "found" ? lookup.session.state : undefined).toBe("quality");
     expect(lookup.status === "found" ? lookup.session.selectedContainer : undefined).toBe("webm");
-    expect(lookup.status === "found" ? lookup.session.activeJobId : undefined).toBe("job-1");
+    expect(lookup.status === "found" ? lookup.session.activeJobId : undefined).toBeUndefined();
+    expect(lookup.status === "found" ? lookup.session.returnState : undefined).toBeUndefined();
   });
 
   it("does not create a second job from stale root callbacks after progress starts", async () => {

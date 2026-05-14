@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   const jobService = new JobService(queue, logger);
   const menuSessionStore = new TelegramMenuSessionStore({ logger });
   const workerRef: { current?: DownloadWorker } = {};
-  let progressCleanup: ReturnType<typeof createTelegramProgressRuntime>["cleanup"] | undefined;
+  const progressCleanupRef: { current?: ReturnType<typeof createTelegramProgressRuntime>["cleanup"] } = {};
 
   const menus = createDownloadMenus({
     store: menuSessionStore,
@@ -92,13 +92,14 @@ async function main(): Promise<void> {
       });
       return { jobId: job.id };
     },
-    onCancel: async ({ session }) => {
+    onCancel: async ({ session, preserveSession }) => {
       if (session.activeJobId) {
         const worker = workerRef.current;
         const result = worker ? worker.cancel(session.activeJobId) : jobService.cancelJob(session.activeJobId);
-        logger.info("telegram.menu.cancel.accepted", {
+        logger.info("[FIX] telegram.menu.cancel.accepted", {
           jobId: session.activeJobId,
           previousStatus: result.previousStatus,
+          preserveSession: Boolean(preserveSession),
         });
         logger.debug("telegram.menu.cancel.result", {
           jobId: session.activeJobId,
@@ -108,7 +109,9 @@ async function main(): Promise<void> {
         });
         const cancelledJob = result.job ?? jobService.getJob(session.activeJobId);
         if (cancelledJob && result.cancelled) {
-          await progressCleanup?.markCancelled(cancelledJob);
+          if (!preserveSession) {
+            await progressCleanupRef.current?.markCancelled(cancelledJob);
+          }
           return {
             accepted: true as const,
             jobId: session.activeJobId,
@@ -146,7 +149,7 @@ async function main(): Promise<void> {
     menus,
     logger,
   });
-  progressCleanup = progressRuntime.cleanup;
+  progressCleanupRef.current = progressRuntime.cleanup;
 
   const metadataDispatcher = new TelegramMetadataResultDispatcher({
     api: bot.api,
