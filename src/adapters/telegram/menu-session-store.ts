@@ -8,10 +8,12 @@ export type TelegramMenuSessionKey = {
   messageId: number;
 };
 
-export type TelegramMenuState = "root" | "container" | "quality" | "audio" | "closed";
+export type TelegramSelectableMenuState = "root" | "container" | "quality" | "audio";
+export type TelegramMenuState = TelegramSelectableMenuState | "starting" | "progress" | "sending" | "closed";
 
 export type TelegramMenuSession = TelegramMenuSessionKey & {
   url: string;
+  requesterUserId?: string;
   title: string;
   duration: number;
   formatOptions: SerializableFormatOption[];
@@ -20,6 +22,9 @@ export type TelegramMenuSession = TelegramMenuSessionKey & {
   state: TelegramMenuState;
   selectedContainer?: string;
   activeJobId?: string;
+  expectedSizeBytes?: number;
+  returnState?: TelegramSelectableMenuState;
+  returnSelectedContainer?: string;
 };
 
 export type TelegramMenuSessionLookup =
@@ -27,8 +32,20 @@ export type TelegramMenuSessionLookup =
   | { status: "missing"; key: TelegramMenuSessionKey }
   | { status: "expired"; key: TelegramMenuSessionKey };
 
+export type TelegramMenuStartResult =
+  | {
+      status: "started";
+      key: TelegramMenuSessionKey;
+      session: TelegramMenuSession;
+      previousState: TelegramSelectableMenuState;
+      previousSelectedContainer?: string;
+    }
+  | { status: "busy"; key: TelegramMenuSessionKey; session: TelegramMenuSession }
+  | { status: "missing" | "expired"; key: TelegramMenuSessionKey };
+
 export type CreateTelegramMenuSessionInput = TelegramMenuSessionKey & {
   url: string;
+  requesterUserId?: string;
   title: string;
   duration: number;
   formatOptions: SerializableFormatOption[];
@@ -54,6 +71,17 @@ export function telegramMenuSessionKeyFromMessage(
     chatId: String(message.chat.id),
     messageId: message.message_id,
   };
+}
+
+export function isTelegramMenuProgressSession(session: TelegramMenuSession): boolean {
+  return (
+    Boolean(session.activeJobId) &&
+    (session.state === "starting" || session.state === "progress" || session.state === "sending")
+  );
+}
+
+function isSelectableMenuState(state: TelegramMenuState): state is TelegramSelectableMenuState {
+  return state === "root" || state === "container" || state === "quality" || state === "audio";
 }
 
 export class TelegramMenuSessionStore {
@@ -82,6 +110,7 @@ export class TelegramMenuSessionStore {
       chatId: input.chatId,
       messageId: input.messageId,
       url: input.url,
+      requesterUserId: input.requesterUserId,
       title: input.title,
       duration: input.duration,
       formatOptions: input.formatOptions,
@@ -96,6 +125,7 @@ export class TelegramMenuSessionStore {
       messageId: session.messageId,
       expiresAt: session.expiresAt,
       formatCount: session.formatOptions.length,
+      hasRequesterUserId: Boolean(session.requesterUserId),
     });
     return session;
   }
@@ -108,7 +138,7 @@ export class TelegramMenuSessionStore {
       return { status: "missing", key };
     }
 
-    if (session.expiresAt <= now) {
+    if (session.expiresAt <= now && !isTelegramMenuProgressSession(session)) {
       this.sessions.delete(storeKey);
       this.logger.debug("telegram.menu_session.expired", { chatId: key.chatId, messageId: key.messageId });
       return { status: "expired", key };
@@ -120,7 +150,18 @@ export class TelegramMenuSessionStore {
 
   update(
     key: TelegramMenuSessionKey,
-    patch: Partial<Pick<TelegramMenuSession, "state" | "selectedContainer" | "activeJobId">>,
+    patch: Partial<
+      Pick<
+        TelegramMenuSession,
+        | "state"
+        | "selectedContainer"
+        | "activeJobId"
+        | "expectedSizeBytes"
+        | "expiresAt"
+        | "returnState"
+        | "returnSelectedContainer"
+      >
+    >,
     now = this.now(),
   ): TelegramMenuSessionLookup {
     const lookup = this.get(key, now);
@@ -137,8 +178,66 @@ export class TelegramMenuSessionStore {
       state: updated.state,
       selectedContainer: updated.selectedContainer,
       hasActiveJob: Boolean(updated.activeJobId),
+      hasExpectedSizeBytes: typeof updated.expectedSizeBytes === "number",
+      returnState: updated.returnState,
+      returnSelectedContainer: updated.returnSelectedContainer,
     });
     return { status: "found", session: updated };
+  }
+
+  tryMarkStarting(
+    key: TelegramMenuSessionKey,
+    patch: Pick<Partial<TelegramMenuSession>, "expectedSizeBytes"> = {},
+    now = this.now(),
+  ): TelegramMenuStartResult {
+    const lookup = this.get(key, now);
+    if (lookup.status !== "found") return { status: lookup.status, key };
+
+    if (lookup.session.state === "starting" || lookup.session.state === "progress" || lookup.session.activeJobId) {
+      this.logger.info("telegram.menu_session.starting_busy", {
+        chatId: key.chatId,
+        messageId: key.messageId,
+        activeJobId: lookup.session.activeJobId,
+      });
+      return { status: "busy", key, session: lookup.session };
+    }
+
+    const previousState = isSelectableMenuState(lookup.session.state) ? lookup.session.state : "root";
+    const previousSelectedContainer = lookup.session.selectedContainer;
+    const updated = {
+      ...lookup.session,
+      state: "starting" as const,
+      expectedSizeBytes: patch.expectedSizeBytes,
+      returnState: previousState,
+      returnSelectedContainer: previousSelectedContainer,
+      expiresAt: now + this.ttlMs,
+    };
+    this.sessions.set(createTelegramMenuSessionKey(key), updated);
+    this.logger.debug("telegram.menu_session.starting", {
+      chatId: key.chatId,
+      messageId: key.messageId,
+      hasExpectedSizeBytes: typeof patch.expectedSizeBytes === "number",
+      returnState: previousState,
+      returnSelectedContainer: previousSelectedContainer,
+    });
+    return { status: "started", key, session: updated, previousState, previousSelectedContainer };
+  }
+
+  markProgress(
+    key: TelegramMenuSessionKey,
+    input: { activeJobId: string; expectedSizeBytes?: number },
+    now = this.now(),
+  ): TelegramMenuSessionLookup {
+    return this.update(
+      key,
+      {
+        state: "progress",
+        activeJobId: input.activeJobId,
+        expectedSizeBytes: input.expectedSizeBytes,
+        expiresAt: now + this.ttlMs,
+      },
+      now,
+    );
   }
 
   delete(key: TelegramMenuSessionKey): boolean {
@@ -154,7 +253,7 @@ export class TelegramMenuSessionStore {
   pruneExpired(now = this.now()): number {
     let count = 0;
     for (const session of this.sessions.values()) {
-      if (session.expiresAt <= now) {
+      if (session.expiresAt <= now && !isTelegramMenuProgressSession(session)) {
         this.sessions.delete(createTelegramMenuSessionKey(session));
         count += 1;
         this.logger.debug("telegram.menu_session.prune_expired", {
